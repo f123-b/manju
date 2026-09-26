@@ -692,6 +692,24 @@ button { color: inherit; }
 .api-status-card .section-kicker { color: #2e78d8; font-size: 10px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .api-status-card h3 { margin: 6px 0 7px; color: #2c3b50; font-size: 15px; }
 .api-status-card p { margin: 0; color: #718094; font-size: 11px; line-height: 1.7; }
+.settings-page .module-header { align-items: center; }
+.settings-api-card { max-width: 840px; margin-top: 18px; padding: 0 24px 20px; }
+.settings-api-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; padding: 20px 0 16px; border-bottom: 1px solid #edf0f4; }
+.settings-api-heading h2 { margin: 6px 0 7px; color: #2c3b50; font-size: 16px; }
+.settings-api-heading p { max-width: 620px; margin: 0; color: #718094; font-size: 11px; line-height: 1.7; }
+.settings-api-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; padding-top: 18px; }
+.settings-api-form label { display: grid; gap: 6px; color: #657286; font-size: 10px; }
+.settings-api-form label > span { color: #9aa3af; font-size: 9px; font-weight: 400; }
+.settings-api-form input, .settings-api-form select { min-height: 37px; padding: 8px 10px; border: 1px solid #dfe5ed; border-radius: 5px; outline: 0; color: #344257; background: #fff; font-size: 11px; }
+.settings-api-form input:focus, .settings-api-form select:focus { border-color: #82b2ef; box-shadow: 0 0 0 3px #eef5ff; }
+.settings-api-wide { grid-column: 1 / -1; }
+.settings-api-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.settings-api-actions button { min-height: 34px; padding: 7px 11px; border: 1px solid #dbe4ef; border-radius: 4px; color: #4e7194; background: #fff; cursor: pointer; font-size: 10px; }
+.settings-api-actions button:hover { border-color: #9fc4ec; color: #2d75d2; }
+.settings-api-actions button:disabled { opacity: .45; cursor: not-allowed; }
+.settings-api-actions .primary-action { border-color: #2d7de2; color: #fff; background: #2d7de2; }
+.settings-api-notice { margin-top: 14px; padding: 9px 10px; border: 1px solid #d4ebdd; border-radius: 5px; color: #2f845b; background: #f2fbf6; font-size: 10px; line-height: 1.5; }
+.settings-api-footnote { display: block; margin-top: 12px; color: #9aa4b0; font-size: 9px; line-height: 1.6; }
 
 /* Audio Engine workspace */
 .audio-runtime { padding: 7px 10px; border: 1px solid #dce6f3; border-radius: 5px; color: #59718e; background: #f7faff; font-size: 10px; }

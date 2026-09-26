@@ -83,6 +83,8 @@ def init_database() -> None:
         connection.executescript(character_migration.read_text(encoding="utf-8"))
         audio_migration = ROOT / "backend" / "migrations" / "003_audio_engine.sql"
         connection.executescript(audio_migration.read_text(encoding="utf-8"))
+        runtime_migration = ROOT / "backend" / "migrations" / "004_runtime_settings.sql"
+        connection.executescript(runtime_migration.read_text(encoding="utf-8"))
         connection.execute("UPDATE shot_characters SET id = 'SCB-' || lower(hex(randomblob(6))) WHERE id IS NULL")
         connection.execute("UPDATE shot_characters SET position = (SELECT COUNT(*) FROM shot_characters earlier WHERE earlier.shot_id = shot_characters.shot_id AND earlier.rowid <= shot_characters.rowid) - 1 WHERE position = 0")
         has_projects = connection.execute("SELECT 1 FROM projects LIMIT 1").fetchone()

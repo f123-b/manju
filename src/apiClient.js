@@ -37,6 +37,18 @@ export function getRemoteHealth() {
   return request("/health");
 }
 
+export function getRemoteProviderSettings() {
+  return request("/settings/providers").then((response) => response.settings || {});
+}
+
+export function saveRemoteProviderSettings(payload) {
+  return request("/settings/providers", { method: "PATCH", body: JSON.stringify(payload) }).then((response) => response.settings || {});
+}
+
+export function testRemoteProviderSettings(payload = {}) {
+  return request("/settings/providers/test", { method: "POST", body: JSON.stringify(payload) });
+}
+
 export function patchRemoteProject(patch) {
   return request("/projects/P001", { method: "PATCH", body: JSON.stringify(patch) });
 }

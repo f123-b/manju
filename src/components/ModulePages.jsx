@@ -469,9 +469,43 @@ function ExportPage({ project, onExport }) {
   </div>;
 }
 
-function SettingsPage({ project, onUpdateProject, backendStatus, providerInfo }) {
+function SettingsPage({ project, onUpdateProject, backendStatus, providerInfo, actions }) {
+  const [settings, setSettings] = useState({ providerUrl: "", providerName: "External Video API", providerModel: "video-default", providerApiKey: "", providerApiKeyMasked: "", apiKeySet: false, voiceProvider: "mock", voiceModel: "voice-default", cosyvoiceUrl: "", chatterboxUrl: "", gptSovitsUrl: "" });
+  const [settingsBusy, setSettingsBusy] = useState(false);
+  const [settingsNotice, setSettingsNotice] = useState("");
   const providerLabel = providerInfo?.mode === "remote" ? `外部接口 · ${providerInfo.provider}` : providerInfo?.mode === "demo" ? "本地演示生成器" : "未连接";
-  return <div className="module-page"><PageHeader eyebrow="Settings" title="项目设置" description="调整项目名称、预算和计划完成日期。" /><section className="module-section settings-form"><label>项目名称<input value={project.title} onChange={(event) => onUpdateProject({ title: event.target.value })} /></label><label>项目状态<select value={project.status} onChange={(event) => onUpdateProject({ status: event.target.value })}>{["策划中", "制作中", "审核中", "已完成"].map((item) => <option key={item}>{item}</option>)}</select></label><label>预算（元）<input type="number" min="0" value={project.budget} onChange={(event) => onUpdateProject({ budget: Number(event.target.value) })} /></label><label>计划完成日期<input type="date" value={project.dueDate} onChange={(event) => onUpdateProject({ dueDate: event.target.value })} /></label></section><section className="module-section api-status-card"><div><span className="section-kicker">API Runtime</span><h3>生成接口</h3><p>{backendStatus === "online" ? (providerInfo?.mode === "remote" ? "已配置外部生成平台，提交镜头后由服务端创建并轮询任务。" : "当前使用本地演示生成器；配置 .env 后会自动切换到外部平台。") : "FastAPI 未连接，生成任务无法同步到服务端。"}</p></div><span className={`status-pill ${backendStatus === "online" ? "success" : "muted"}`}>{providerLabel}</span></section></div>;
+  useEffect(() => {
+    if (backendStatus !== "online") return;
+    actions.getProviderSettings().then(setSettings).catch(() => setSettingsNotice("API 配置读取失败"));
+  }, [backendStatus]);
+
+  const update = (key, value) => setSettings((current) => ({ ...current, [key]: value }));
+  const saveSettings = async () => {
+    setSettingsBusy(true);
+    setSettingsNotice("");
+    try {
+      const next = await actions.saveProviderSettings(settings);
+      setSettings(next);
+      setSettingsNotice("API 配置已保存，新的图片、视频和音频任务会立即使用。");
+    } catch (error) {
+      setSettingsNotice(error?.message || "API 配置保存失败");
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+  const testSettings = async (kind) => {
+    setSettingsBusy(true);
+    setSettingsNotice("");
+    try {
+      const result = await actions.testProviderSettings({ ...settings, kind });
+      setSettingsNotice(result.message || (result.ok ? "接口连接成功" : "接口连接失败"));
+    } catch (error) {
+      setSettingsNotice(error?.message || "接口测试失败");
+    } finally {
+      setSettingsBusy(false);
+    }
+  };
+  return <div className="module-page settings-page"><PageHeader eyebrow="Settings" title="项目设置" description="项目资料和生成 API 都在这里配置，保存后后台任务会立即切换。" /><section className="module-section settings-form"><label>项目名称<input value={project.title} onChange={(event) => onUpdateProject({ title: event.target.value })} /></label><label>项目状态<select value={project.status} onChange={(event) => onUpdateProject({ status: event.target.value })}>{["策划中", "制作中", "审核中", "已完成"].map((item) => <option key={item}>{item}</option>)}</select></label><label>预算（元）<input type="number" min="0" value={project.budget} onChange={(event) => onUpdateProject({ budget: Number(event.target.value) })} /></label><label>计划完成日期<input type="date" value={project.dueDate} onChange={(event) => onUpdateProject({ dueDate: event.target.value })} /></label></section><section className="module-section settings-api-card"><div className="settings-api-heading"><div><span className="section-kicker">Provider Settings</span><h2>生成 API 配置</h2><p>不填写时使用本地 WAV / 图片演示 Provider；填写后，新任务会调用外部服务。API Key 仅保存在本机后台，页面只显示掩码。</p></div><span className={`status-pill ${backendStatus === "online" ? "success" : "muted"}`}>{providerLabel}</span></div><div className="settings-api-form"><label className="settings-api-wide">通用图片/视频 API 地址<span>POST JSON 接口，例如你的统一生成网关</span><input value={settings.providerUrl || ""} onChange={(event) => update("providerUrl", event.target.value)} placeholder="https://your-provider.example.com/v1/generate" /></label><label>Provider 名称<input value={settings.providerName || ""} onChange={(event) => update("providerName", event.target.value)} placeholder="External Video API" /></label><label>默认模型<input value={settings.providerModel || ""} onChange={(event) => update("providerModel", event.target.value)} placeholder="video-default" /></label><label className="settings-api-wide">API Key<input type="password" value={settings.providerApiKey || ""} onChange={(event) => update("providerApiKey", event.target.value)} placeholder={settings.apiKeySet ? "已保存密钥，留空保持不变" : "sk-..."} autoComplete="off" /></label><div className="settings-api-wide settings-api-actions"><button type="button" onClick={() => testSettings("video")} disabled={settingsBusy || !settings.providerUrl}>测试通用接口</button></div><label>声音 Provider<select value={settings.voiceProvider || "mock"} onChange={(event) => update("voiceProvider", event.target.value)}>{[["mock", "本地 WAV Demo"], ["cosyvoice", "CosyVoice HTTP"], ["chatterbox", "Chatterbox HTTP"], ["gpt-sovits", "GPT-SoVITS HTTP"]].map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>声音模型<input value={settings.voiceModel || ""} onChange={(event) => update("voiceModel", event.target.value)} placeholder="voice-default" /></label><label>CosyVoice 地址<input value={settings.cosyvoiceUrl || ""} onChange={(event) => update("cosyvoiceUrl", event.target.value)} placeholder="http://127.0.0.1:50000/..." /></label><label>Chatterbox 地址<input value={settings.chatterboxUrl || ""} onChange={(event) => update("chatterboxUrl", event.target.value)} placeholder="http://127.0.0.1:8001/tts" /></label><label>GPT-SoVITS 地址<input value={settings.gptSovitsUrl || ""} onChange={(event) => update("gptSovitsUrl", event.target.value)} placeholder="http://127.0.0.1:9880/tts" /></label><div className="settings-api-actions settings-api-wide"><button type="button" onClick={() => testSettings("audio")} disabled={settingsBusy || settings.voiceProvider === "mock"}>测试声音接口</button><button className="primary-action" type="button" onClick={saveSettings} disabled={settingsBusy || backendStatus !== "online"}>{settingsBusy ? "保存中…" : "保存 API 配置"}</button></div></div>{settingsNotice && <div className="settings-api-notice">{settingsNotice}</div>}<small className="settings-api-footnote">连接测试只检查地址是否可访问，不会消耗生成额度。CosyVoice、Chatterbox 和 GPT-SoVITS 仍需在本机或服务器单独运行。</small></section><section className="module-section api-status-card"><div><span className="section-kicker">API Runtime</span><h3>任务运行状态</h3><p>{backendStatus === "online" ? (providerInfo?.mode === "remote" ? "已配置外部生成平台，新的任务会写入持久队列并由后台执行。" : "当前使用本地演示 Provider；保存外部地址后会自动切换。") : "FastAPI 未连接，生成任务无法同步到服务端。"}</p></div><span className={`status-pill ${backendStatus === "online" ? "success" : "muted"}`}>{providerLabel}</span></section></div>;
 }
 
 export function ModulePage({ activeNav, project, stats, actions }) {
@@ -486,7 +520,7 @@ export function ModulePage({ activeNav, project, stats, actions }) {
   if (activeNav === "时间线") return <TimelinePage project={project} actions={actions} />;
   if (activeNav === "质检") return <QCPage project={project} onReviewShot={actions.reviewShot} onRegenerate={actions.regenerateShot} />;
   if (activeNav === "导出") return <ExportPage project={project} onExport={actions.exportProject} />;
-  return <SettingsPage project={project} onUpdateProject={actions.updateProject} backendStatus={actions.backendStatus} providerInfo={actions.providerInfo} />;
+  return <SettingsPage project={project} onUpdateProject={actions.updateProject} backendStatus={actions.backendStatus} providerInfo={actions.providerInfo} actions={actions} />;
 }
 
 export function SearchDialog({ open, project, onClose, onOpenResult }) {

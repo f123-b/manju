@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import os
 from urllib.parse import quote
 from typing import Any, Optional
@@ -90,6 +91,7 @@ from .services.export_service import export_project_package
 from .services.asset_generation_service import generate_asset_image
 from .services.script_service import generate_episode_matrix, generate_scene_script, generate_shot_breakdown
 from .services.task_engine import task_engine
+from .services.runtime_settings import _raw_settings, public_provider_settings, save_provider_settings, test_provider_connection
 
 
 app = FastAPI(title="Short Drama OS API", version="1.0.0")
@@ -125,6 +127,7 @@ def find_shot(shot_id: str) -> dict[str, Any]:
 @app.on_event("startup")
 async def startup() -> None:
     init_database()
+    registry.reload()
     task_engine.start()
 
 
@@ -136,6 +139,28 @@ async def shutdown() -> None:
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
     return {"ok": True, "database": str(DB_PATH), "schemaVersion": 2, **registry.summary()}
+
+
+@app.get("/api/settings/providers")
+async def get_provider_settings() -> dict[str, Any]:
+    return {"settings": public_provider_settings()}
+
+
+@app.patch("/api/settings/providers")
+async def patch_provider_settings(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    settings = save_provider_settings(payload)
+    registry.reload()
+    return {"settings": settings, "provider": registry.summary()}
+
+
+@app.post("/api/settings/providers/test")
+async def post_provider_settings_test(payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    settings = _raw_settings()
+    for key, value in (payload or {}).items():
+        if key == "providerApiKey" and not value:
+            continue
+        settings[key] = value
+    return await asyncio.to_thread(test_provider_connection, settings)
 
 
 @app.get("/api/projects")

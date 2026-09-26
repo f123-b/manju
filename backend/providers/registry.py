@@ -11,22 +11,41 @@ from .voice import VoiceHttpProvider
 
 class ProviderRegistry:
     def __init__(self) -> None:
-        self.external_url = os.environ.get("SHORT_DRAMA_PROVIDER_URL")
-        self.external_name = os.environ.get("SHORT_DRAMA_PROVIDER_NAME", "External Video API")
-        self.external_model = os.environ.get("SHORT_DRAMA_PROVIDER_MODEL", "video-default")
-        self.api_key = os.environ.get("SHORT_DRAMA_PROVIDER_API_KEY")
+        self.apply_settings({
+            "providerUrl": os.environ.get("SHORT_DRAMA_PROVIDER_URL", ""),
+            "providerName": os.environ.get("SHORT_DRAMA_PROVIDER_NAME", "External Video API"),
+            "providerModel": os.environ.get("SHORT_DRAMA_PROVIDER_MODEL", "video-default"),
+            "providerApiKey": os.environ.get("SHORT_DRAMA_PROVIDER_API_KEY", ""),
+            "voiceProvider": os.environ.get("SHORT_DRAMA_VOICE_PROVIDER", "mock"),
+            "voiceModel": os.environ.get("SHORT_DRAMA_VOICE_PROVIDER_MODEL", "voice-default"),
+            "cosyvoiceUrl": os.environ.get("SHORT_DRAMA_COSYVOICE_URL") or os.environ.get("SHORT_DRAMA_VOICE_PROVIDER_URL", ""),
+            "chatterboxUrl": os.environ.get("SHORT_DRAMA_CHATTERBOX_URL", ""),
+            "gptSovitsUrl": os.environ.get("SHORT_DRAMA_GPTSOVITS_URL", ""),
+        })
+
+    def apply_settings(self, settings: dict[str, Any]) -> None:
+        self.external_url = settings.get("providerUrl") or None
+        self.external_name = settings.get("providerName") or "External Video API"
+        self.external_model = settings.get("providerModel") or "video-default"
+        self.api_key = settings.get("providerApiKey") or None
+        self.voice_provider = (settings.get("voiceProvider") or "mock").lower()
         self.voice_endpoints = {
-            "cosyvoice": os.environ.get("SHORT_DRAMA_COSYVOICE_URL") or os.environ.get("SHORT_DRAMA_VOICE_PROVIDER_URL"),
-            "chatterbox": os.environ.get("SHORT_DRAMA_CHATTERBOX_URL"),
-            "gpt-sovits": os.environ.get("SHORT_DRAMA_GPTSOVITS_URL"),
+            "cosyvoice": settings.get("cosyvoiceUrl") or None,
+            "chatterbox": settings.get("chatterboxUrl") or None,
+            "gpt-sovits": settings.get("gptSovitsUrl") or None,
         }
-        self.voice_model = os.environ.get("SHORT_DRAMA_VOICE_PROVIDER_MODEL", "voice-default")
+        self.voice_model = settings.get("voiceModel") or "voice-default"
+
+    def reload(self) -> None:
+        from ..services.runtime_settings import _raw_settings
+
+        self.apply_settings(_raw_settings())
 
     def resolve(self, kind: str, provider: str | None = None, model: str | None = None) -> BaseProvider:
         if kind in {"image", "video"} and self.external_url and (not provider or provider == self.external_name):
             return HttpProvider(kind, self.external_url, self.external_name, model or self.external_model, self.api_key)
         if kind == "audio":
-            provider_key = (provider or os.environ.get("SHORT_DRAMA_VOICE_PROVIDER") or "mock").lower()
+            provider_key = (provider or self.voice_provider or "mock").lower()
             endpoint = self.voice_endpoints.get(provider_key)
             if endpoint:
                 return VoiceHttpProvider(provider_key, endpoint, model or self.voice_model, self.api_key)
@@ -35,7 +54,7 @@ class ProviderRegistry:
     def summary(self) -> dict[str, Any]:
         return {
             "mode": "remote" if self.external_url or any(self.voice_endpoints.values()) else "demo",
-            "provider": self.external_name if self.external_url else "Local Demo",
+            "provider": self.external_name if self.external_url else (self.voice_provider if any(self.voice_endpoints.values()) else "Local Demo"),
             "configured": bool(self.external_url or any(self.voice_endpoints.values())),
             "types": ["text", "image", "video", "audio"],
             "voiceProviders": {key: bool(value) for key, value in self.voice_endpoints.items()},

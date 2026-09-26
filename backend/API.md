@@ -20,6 +20,8 @@ GET       /api/shots/{shot_id}/versions
 POST      /api/versions/{version_id}/activate
 GET       /api/projects/{project_id}/costs|qc
 POST      /api/projects/{project_id}/export
+GET/PATCH  /api/settings/providers
+POST       /api/settings/providers/test
 
 # Audio Engine V1
 GET/POST   /api/characters/{character_id}/voice-profiles

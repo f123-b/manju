@@ -17,6 +17,7 @@ import {
   generateRemoteMasterSheet,
   generateRemoteSceneScript,
   generateRemoteShot,
+  getRemoteProviderSettings,
   getRemoteHealth,
   getRemoteProject,
   getRemoteScenes,
@@ -49,6 +50,8 @@ import {
   retryRemoteTask,
   runRemoteTakeQC,
   saveRemoteProject,
+  saveRemoteProviderSettings,
+  testRemoteProviderSettings,
 } from "./apiClient.js";
 import {
   addShot,
@@ -415,6 +418,22 @@ export function App() {
         notify("本集混音已生成");
         return mixdown;
       });
+    },
+    getProviderSettings: () => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return getRemoteProviderSettings();
+    },
+    saveProviderSettings: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return saveRemoteProviderSettings(payload).then((settings) => {
+        getRemoteHealth().then(setProviderInfo).catch(() => {});
+        notify("API 配置已保存，新的任务会立即使用");
+        return settings;
+      });
+    },
+    testProviderSettings: (payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return testRemoteProviderSettings(payload);
     },
     saveScene: (sceneId, patch) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
