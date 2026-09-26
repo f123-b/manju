@@ -1,5 +1,29 @@
 # 外部视频生成 API 契约
 
+## 内部资源 API
+
+服务端使用 SQLite 关系表保存项目、剧集、场景、镜头、资产、生成任务、版本、成本和质检记录。桌面预览版默认使用 `P001`，主要资源接口如下：
+
+```text
+GET/PATCH /api/projects/{project_id}
+GET/PATCH /api/projects/{project_id}/story-bible
+GET/POST   /api/projects/{project_id}/episodes
+GET/PATCH /api/episodes/{episode_id}
+GET/POST   /api/episodes/{episode_id}/scenes
+GET/PATCH /api/scenes/{scene_id}
+GET/POST   /api/scenes/{scene_id}/shots
+GET/PATCH/DELETE /api/shots/{shot_id}
+GET/POST   /api/shots/{shot_id}/generate
+GET       /api/generation-tasks/{task_id}
+POST      /api/generation-tasks/{task_id}/retry|cancel
+GET       /api/shots/{shot_id}/versions
+POST      /api/versions/{version_id}/activate
+GET       /api/projects/{project_id}/costs|qc
+POST      /api/projects/{project_id}/export
+```
+
+生成任务会先写入 `generation_tasks` 的 `Queued` 状态，由独立后台 worker 领取；服务重启会把未完成的 `Running` 任务恢复为 `Queued`，不会依赖请求协程存活。
+
 Short Drama OS 在服务端通过 `SHORT_DRAMA_PROVIDER_URL` 发起一个 JSON `POST` 请求。
 
 请求体示例：

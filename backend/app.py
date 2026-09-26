@@ -1,313 +1,404 @@
 from __future__ import annotations
 
-import asyncio
-import json
 import os
-import sqlite3
-import threading
-import time
-import urllib.error
-import urllib.request
-from datetime import datetime
-from pathlib import Path
-from typing import Any
+from urllib.parse import quote
+from typing import Any, Optional
 
 from fastapi import Body, FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+
+from .core.config import DB_PATH, DIST_DIR, PROJECT_ID
+from .core.database import init_database
+from .domain.repository import (
+    activate_version,
+    affected_shots,
+    cancel_generation_task,
+    create_episode,
+    create_asset,
+    create_generation_task,
+    create_project,
+    create_scene,
+    create_shot,
+    delete_shot,
+    episode_dict,
+    generation_task,
+    list_costs,
+    list_models,
+    list_projects,
+    list_qc,
+    list_scenes,
+    list_shots_for_scene,
+    list_versions,
+    patch_asset,
+    patch_episode,
+    patch_project,
+    patch_scene,
+    patch_shot,
+    patch_story_bible,
+    project_to_dict,
+    retry_generation_task,
+)
+from .domain.seed import seed_legacy_project
+from .providers.registry import ProviderRegistry
+from .services.export_service import export_project_package
+from .services.script_service import generate_episode_matrix, generate_scene_script, generate_shot_breakdown
+from .services.task_engine import task_engine
 
 
-ROOT = Path(__file__).resolve().parents[1]
+app = FastAPI(title="Short Drama OS API", version="1.0.0")
+registry = ProviderRegistry()
 
 
-def load_env_file() -> None:
-    env_file = ROOT / ".env"
-    if not env_file.exists():
-        return
-    for raw_line in env_file.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#") or "=" not in line:
-            continue
-        key, value = line.split("=", 1)
-        os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
+def not_found(message: str) -> HTTPException:
+    return HTTPException(status_code=404, detail=message)
 
 
-load_env_file()
-DATA_DIR = ROOT / "data"
-DB_PATH = Path(os.environ.get("SHORT_DRAMA_DB", DATA_DIR / "short-drama.sqlite3"))
-DIST_DIR = ROOT / "dist" / "client"
-DB_LOCK = threading.Lock()
-
-
-def now_text() -> str:
-    return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-
-def init_db() -> None:
-    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with sqlite3.connect(DB_PATH) as connection:
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS project_state (
-                project_id TEXT PRIMARY KEY,
-                data_json TEXT NOT NULL,
-                updated_at TEXT NOT NULL
-            )
-            """
-        )
-        connection.execute(
-            """
-            CREATE TABLE IF NOT EXISTS generation_events (
-                task_id TEXT PRIMARY KEY,
-                shot_id TEXT NOT NULL,
-                provider TEXT NOT NULL,
-                status TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                completed_at TEXT,
-                error TEXT
-            )
-            """
-        )
-
-
-def read_project() -> dict[str, Any] | None:
-    init_db()
-    with DB_LOCK, sqlite3.connect(DB_PATH) as connection:
-        row = connection.execute(
-            "SELECT data_json FROM project_state ORDER BY updated_at DESC LIMIT 1"
-        ).fetchone()
-    return json.loads(row[0]) if row else None
-
-
-def write_project(project: dict[str, Any]) -> dict[str, Any]:
-    init_db()
-    project_id = str(project.get("id") or "P001")
-    project["id"] = project_id
-    project["schemaVersion"] = int(project.get("schemaVersion") or 1)
-    with DB_LOCK, sqlite3.connect(DB_PATH) as connection:
-        connection.execute(
-            """
-            INSERT INTO project_state(project_id, data_json, updated_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(project_id) DO UPDATE SET
-                data_json = excluded.data_json,
-                updated_at = excluded.updated_at
-            """,
-            (project_id, json.dumps(project, ensure_ascii=False), now_text()),
-        )
-    return project
-
-
-def record_event(task_id: str, shot_id: str, provider: str, status: str, error: str | None = None) -> None:
-    init_db()
-    with DB_LOCK, sqlite3.connect(DB_PATH) as connection:
-        connection.execute(
-            """
-            INSERT INTO generation_events(task_id, shot_id, provider, status, created_at, completed_at, error)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(task_id) DO UPDATE SET
-                status = excluded.status,
-                completed_at = excluded.completed_at,
-                error = excluded.error
-            """,
-            (task_id, shot_id, provider, status, now_text(), now_text() if status != "Running" else None, error),
-        )
-
-
-class GenerateRequest(BaseModel):
-    shot_id: str
-    prompt: str = ""
-
-
-class GenerationProvider:
-    name = "Auto"
-    estimated_cost = 0.73
-
-    async def generate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        raise NotImplementedError
-
-
-class LocalDemoProvider(GenerationProvider):
-    name = "Local Demo"
-
-    async def generate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        await asyncio.sleep(float(os.environ.get("SHORT_DRAMA_DEMO_DELAY", "2.2")))
-        return {"status": "Success", "cost": self.estimated_cost}
-
-
-class HttpGenerationProvider(GenerationProvider):
-    """Generic provider adapter for a video platform with a JSON POST endpoint.
-
-    Configure SHORT_DRAMA_PROVIDER_URL and SHORT_DRAMA_PROVIDER_API_KEY. The
-    endpoint should return JSON with status=Success, or a status_url that can
-    be polled until the task finishes.
-    """
-
-    name = os.environ.get("SHORT_DRAMA_PROVIDER_NAME", "External Video API")
-    estimated_cost = float(os.environ.get("SHORT_DRAMA_ESTIMATED_COST", "0.73"))
-
-    def __init__(self, url: str, api_key: str | None) -> None:
-        self.url = url
-        self.api_key = api_key
-        self.model = os.environ.get("SHORT_DRAMA_PROVIDER_MODEL", "video-default")
-        self.auth_header = os.environ.get("SHORT_DRAMA_PROVIDER_AUTH_HEADER", "Authorization")
-        self.auth_prefix = os.environ.get("SHORT_DRAMA_PROVIDER_AUTH_PREFIX", "Bearer")
-
-    def _request(self, url: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
-        headers = {"Content-Type": "application/json"}
-        if self.api_key:
-            headers[self.auth_header] = f"{self.auth_prefix} {self.api_key}".strip()
-        request = urllib.request.Request(
-            url,
-            data=json.dumps(payload or {}).encode("utf-8") if payload is not None else None,
-            headers=headers,
-            method="POST" if payload is not None else "GET",
-        )
-        with urllib.request.urlopen(request, timeout=45) as response:
-            return json.loads(response.read().decode("utf-8"))
-
-    async def generate(self, payload: dict[str, Any]) -> dict[str, Any]:
-        response = await asyncio.to_thread(self._request, self.url, payload)
-        status_url = response.get("status_url") or response.get("statusUrl")
-        if status_url and response.get("status") in {None, "Running", "Queued", "Processing"}:
-            for _ in range(90):
-                await asyncio.sleep(2)
-                response = await asyncio.to_thread(self._request, status_url)
-                if response.get("status") in {"Success", "Failed", "Cancelled"}:
-                    break
-        if response.get("status") == "Failed":
-            raise RuntimeError(response.get("error") or "外部生成平台返回失败")
-        return {
-            "status": "Success",
-            "cost": float(response.get("cost") or self.estimated_cost),
-            "output_url": response.get("output_url") or response.get("video_url"),
-        }
-
-
-def provider_for_request() -> GenerationProvider:
-    url = os.environ.get("SHORT_DRAMA_PROVIDER_URL")
-    if url:
-        return HttpGenerationProvider(url, os.environ.get("SHORT_DRAMA_PROVIDER_API_KEY"))
-    return LocalDemoProvider()
-
-
-def finish_project_generation(project: dict[str, Any], task_id: str, result: dict[str, Any]) -> dict[str, Any]:
-    task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
-    if not task:
-        return project
-    shot = next((item for item in project.get("shots", []) if item.get("id") == task.get("shotId")), None)
-    if not shot:
-        task["status"] = "Failed"
-        task["error"] = "镜头不存在"
-        return project
-
-    was_generated = shot.get("status") == "已生成"
-    versions = [{**version, "active": False} for version in shot.get("versions", [])]
-    versions.append({
-        "id": f"V{len(versions) + 1}",
-        "createdAt": now_text(),
-        "active": True,
-        **({"outputUrl": result["output_url"]} if result.get("output_url") else {}),
-    })
-    cost = round(float(result.get("cost") or task.get("cost") or 0.73), 2)
-    shot.update({
-        "status": "已生成",
-        "qcScore": shot.get("qcScore") or 91,
-        "cost": round(float(shot.get("cost") or 0) + cost, 2),
-        "versions": versions,
-    })
-    task.update({"status": "Success", "cost": cost, "completedAt": now_text()})
-    project["spent"] = round(float(project.get("spent") or 0) + cost, 2)
-    production = project.setdefault("production", {})
-    production["generatedShots"] = int(production.get("generatedShots") or 0) + (0 if was_generated else 1)
-    return project
-
-
-async def run_generation(task_id: str, shot_id: str, prompt: str, provider: GenerationProvider) -> None:
+def project_response(project_id: str) -> dict[str, Any]:
     try:
-        result = await provider.generate({
-            "project_id": (read_project() or {}).get("id", "P001"),
-            "shot_id": shot_id,
-            "prompt": prompt,
-            "model": getattr(provider, "model", provider.name),
-        })
-        project = read_project()
-        if project:
-            write_project(finish_project_generation(project, task_id, result))
-        record_event(task_id, shot_id, provider.name, "Success")
-    except Exception as error:  # noqa: BLE001 - task state must be visible to the UI
-        project = read_project()
-        if project:
-            task = next((item for item in project.get("tasks", []) if item.get("id") == task_id), None)
-            shot = next((item for item in project.get("shots", []) if item.get("id") == shot_id), None)
-            if task:
-                task.update({"status": "Failed", "error": str(error)})
-            if shot:
-                shot["status"] = "待生成"
-            write_project(project)
-        record_event(task_id, shot_id, provider.name, "Failed", str(error))
+        return project_to_dict(project_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
 
 
-app = FastAPI(title="Short Drama OS API", version="0.2.0")
+def task_response(task_id: str) -> dict[str, Any]:
+    try:
+        return generation_task(task_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+def find_shot(shot_id: str) -> dict[str, Any]:
+    for item in list_projects():
+        for shot in project_response(item["id"]).get("shots", []):
+            if shot["id"] == shot_id:
+                return shot
+    raise not_found("镜头不存在")
 
 
 @app.on_event("startup")
 async def startup() -> None:
-    init_db()
+    init_database()
+    task_engine.start()
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    task_engine.stop()
 
 
 @app.get("/api/health")
 async def health() -> dict[str, Any]:
-    provider = provider_for_request()
-    return {"ok": True, "database": str(DB_PATH), "provider": provider.name, "mode": "remote" if isinstance(provider, HttpGenerationProvider) else "demo"}
+    return {"ok": True, "database": str(DB_PATH), "schemaVersion": 2, **registry.summary()}
 
 
+@app.get("/api/projects")
+async def get_projects() -> dict[str, Any]:
+    return {"items": list_projects()}
+
+
+@app.post("/api/projects")
+async def post_project(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return project_response(create_project(payload))
+    except Exception as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/projects/{project_id}")
+async def get_project_resource(project_id: str) -> dict[str, Any]:
+    return project_response(project_id)
+
+
+@app.patch("/api/projects/{project_id}")
+async def patch_project_resource(project_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return patch_project(project_id, payload)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/projects/{project_id}/story-bible")
+async def get_story_bible(project_id: str) -> dict[str, Any]:
+    return project_response(project_id)["storyBible"]
+
+
+@app.patch("/api/projects/{project_id}/story-bible")
+async def patch_story_bible_resource(project_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return patch_story_bible(project_id, payload)["storyBible"]
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/projects/{project_id}/episodes")
+async def get_episodes(project_id: str) -> dict[str, Any]:
+    project = project_response(project_id)
+    return {"items": project["episodes"]}
+
+
+@app.post("/api/projects/{project_id}/episodes")
+async def post_episode(project_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return episode_dict(create_episode(project_id, payload))
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/episodes/{episode_id}")
+async def get_episode(episode_id: str) -> dict[str, Any]:
+    try:
+        return episode_dict(episode_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.patch("/api/episodes/{episode_id}")
+async def patch_episode_resource(episode_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        project_id = patch_episode(episode_id, payload)
+        return next(item for item in project_response(project_id)["episodes"] if item["id"] == episode_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/episodes/{episode_id}/scenes")
+async def get_scenes(episode_id: str) -> dict[str, Any]:
+    return {"items": list_scenes(episode_id)}
+
+
+@app.post("/api/episodes/{episode_id}/scenes")
+async def post_scene(episode_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        scene_id = create_scene(episode_id, payload)
+        return next(item for item in list_scenes(episode_id) if item["id"] == scene_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/scenes/{scene_id}")
+async def get_scene(scene_id: str) -> dict[str, Any]:
+    from .core.database import session
+
+    with session() as connection:
+        row = connection.execute("SELECT episode_id FROM scenes WHERE id = ? AND archived = 0", (scene_id,)).fetchone()
+    if not row:
+        raise not_found("场景不存在")
+    try:
+        return next(item for item in list_scenes(row["episode_id"]) if item["id"] == scene_id)
+    except StopIteration as error:
+        raise not_found("场景不存在") from error
+
+
+@app.patch("/api/scenes/{scene_id}")
+async def patch_scene_resource(scene_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        project_id = patch_scene(scene_id, payload)
+        return {"projectId": project_id, **await get_scene(scene_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/scenes/{scene_id}/shots")
+async def get_scene_shots(scene_id: str) -> dict[str, Any]:
+    return {"items": list_shots_for_scene(scene_id)}
+
+
+@app.post("/api/scenes/{scene_id}/shots")
+async def post_scene_shot(scene_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        project_id, _ = create_shot(scene_id, payload)
+        shot = list_shots_for_scene(scene_id)[-1]
+        return {"projectId": project_id, "shot": shot}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/shots/{shot_id}")
+async def get_shot(shot_id: str) -> dict[str, Any]:
+    return find_shot(shot_id)
+
+
+@app.patch("/api/shots/{shot_id}")
+async def patch_shot_resource(shot_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        project = patch_shot(shot_id, payload)
+        return next(item for item in project["shots"] if item["id"] == shot_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.delete("/api/shots/{shot_id}")
+async def delete_shot_resource(shot_id: str) -> dict[str, Any]:
+    try:
+        project_id = delete_shot(shot_id)
+        return {"ok": True, "projectId": project_id}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/projects/{project_id}/assets")
+async def get_assets(project_id: str) -> dict[str, Any]:
+    return project_response(project_id)["assets"]
+
+
+@app.post("/api/projects/{project_id}/export")
+async def export_project(project_id: str) -> Response:
+    try:
+        filename, content = export_project_package(project_id)
+        encoded = quote(filename)
+        return Response(content=content, media_type="application/zip", headers={"Content-Disposition": f'attachment; filename="short-drama-project-package.zip"; filename*=UTF-8\'\'{encoded}'})
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/{asset_type}")
+async def post_asset(project_id: str, asset_type: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    if asset_type not in {"characters", "locations", "props"}:
+        raise not_found("资产类型不存在")
+    try:
+        asset_id = create_asset(project_id, asset_type, payload)
+        asset = next(item for item in project_response(project_id)["assets"][asset_type] if item["id"] == asset_id)
+        return {"projectId": project_id, "asset": asset}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.patch("/api/assets/{asset_id}")
+async def patch_asset_resource(asset_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        project_id = patch_asset(asset_id, payload)
+        return {"projectId": project_id, "assets": project_response(project_id)["assets"]}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/assets/{asset_id}/affected-shots")
+async def get_affected_shots(asset_id: str) -> dict[str, Any]:
+    return {"assetId": asset_id, "shotIds": affected_shots(asset_id)}
+
+
+@app.post("/api/shots/{shot_id}/generate")
+async def generate_shot(shot_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    payload = payload or {}
+    shot = await get_shot(shot_id)
+    summary = registry.summary()
+    provider = payload.get("provider") or summary["provider"]
+    model = payload.get("model") or (registry.external_model if summary["mode"] == "remote" else "mock-video")
+    estimated_cost = float(payload.get("estimatedCost") or (0.73 if summary["mode"] == "demo" else os.environ.get("SHORT_DRAMA_ESTIMATED_COST", "0.73")))
+    try:
+        project_id, task_id = create_generation_task(shot_id, payload.get("prompt") or shot.get("prompt", ""), provider, model, estimated_cost)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    task_engine.wake()
+    return {"task": task_response(task_id), "project": project_response(project_id), "provider": provider}
+
+
+@app.get("/api/generation-tasks/{task_id}")
+async def get_generation_task(task_id: str) -> dict[str, Any]:
+    return task_response(task_id)
+
+
+@app.post("/api/generation-tasks/{task_id}/cancel")
+async def cancel_task(task_id: str) -> dict[str, Any]:
+    try:
+        project_id = cancel_generation_task(task_id)
+        task_engine.wake()
+        return {"task": task_response(task_id), "project": project_response(project_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/generation-tasks/{task_id}/retry")
+async def retry_task(task_id: str) -> dict[str, Any]:
+    try:
+        project_id, _ = retry_generation_task(task_id)
+        task_engine.wake()
+        return {"task": task_response(task_id), "project": project_response(project_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/api/shots/{shot_id}/versions")
+async def get_versions(shot_id: str) -> dict[str, Any]:
+    return {"items": list_versions(shot_id)}
+
+
+@app.post("/api/versions/{version_id}/activate")
+async def post_activate_version(version_id: str) -> dict[str, Any]:
+    try:
+        shot_id = activate_version(version_id)
+        return {"ok": True, "shotId": shot_id, "versions": list_versions(shot_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/projects/{project_id}/costs")
+async def get_project_costs(project_id: str) -> dict[str, Any]:
+    project_response(project_id)
+    return list_costs(project_id)
+
+
+@app.get("/api/projects/{project_id}/qc")
+async def get_project_qc(project_id: str) -> dict[str, Any]:
+    project_response(project_id)
+    return {"items": list_qc(project_id=project_id)}
+
+
+@app.post("/api/shots/{shot_id}/review")
+async def review_shot(shot_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    payload = payload or {}
+    return await patch_shot_resource(shot_id, {"reviewed": payload.get("reviewed", True)})
+
+
+@app.get("/api/models")
+async def get_models() -> dict[str, Any]:
+    return {"items": list_models(), "provider": registry.summary()}
+
+
+@app.post("/api/episodes/{episode_id}/matrix")
+async def post_episode_matrix(episode_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    try:
+        return generate_episode_matrix(episode_id, payload or {})
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/scenes/{scene_id}/script")
+async def post_scene_script(scene_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    try:
+        return generate_scene_script(scene_id, payload or {})
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/scenes/{scene_id}/breakdown")
+async def post_scene_breakdown(scene_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    try:
+        return {"items": generate_shot_breakdown(scene_id, payload or {})}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+# Compatibility endpoints for the existing frontend and older desktop builds.
 @app.get("/api/project")
-async def get_project() -> dict[str, Any]:
-    project = read_project()
-    if not project:
-        raise HTTPException(status_code=404, detail="尚未初始化项目")
-    return project
+async def get_project_legacy() -> dict[str, Any]:
+    return project_response(PROJECT_ID)
 
 
 @app.put("/api/project")
-async def put_project(project: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    if project.get("schemaVersion") != 1 or not project.get("id"):
+async def put_project_legacy(project: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    if not project.get("id"):
         raise HTTPException(status_code=422, detail="项目数据格式无效")
-    return write_project(project)
+    seed_legacy_project(project)
+    return project_response(project["id"])
 
 
 @app.post("/api/generations")
-async def create_generation(request: GenerateRequest) -> dict[str, Any]:
-    project = read_project()
-    if not project:
-        raise HTTPException(status_code=404, detail="尚未初始化项目")
-    shot = next((item for item in project.get("shots", []) if item.get("id") == request.shot_id), None)
-    if not shot:
-        raise HTTPException(status_code=404, detail="镜头不存在")
-
-    provider = provider_for_request()
-    task_id = f"T{int(time.time() * 1000)}"
-    while any(item.get("id") == task_id for item in project.get("tasks", [])):
-        await asyncio.sleep(0.001)
-        task_id = f"T{int(time.time() * 1000)}"
-    task = {
-        "id": task_id,
-        "shotId": request.shot_id,
-        "type": "视频",
-        "model": provider.name,
-        "status": "Running",
-        "cost": provider.estimated_cost,
-        "createdAt": now_text(),
-    }
-    project.setdefault("tasks", []).insert(0, task)
-    shot["prompt"] = request.prompt or shot.get("prompt", "")
-    shot["status"] = "生成中"
-    write_project(project)
-    record_event(task_id, request.shot_id, provider.name, "Running")
-    asyncio.create_task(run_generation(task_id, request.shot_id, shot["prompt"], provider))
-    return {"task": task, "project": project, "provider": provider.name}
+async def create_generation_legacy(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    return await generate_shot(payload.get("shot_id") or payload.get("shotId"), {"prompt": payload.get("prompt", "")})
 
 
 @app.get("/{path:path}")
@@ -318,7 +409,11 @@ async def serve_client(path: str = ""):
         raise HTTPException(status_code=404, detail="前端尚未构建，请先运行 npm.cmd run build")
     candidate = (DIST_DIR / path).resolve()
     if candidate.is_file() and DIST_DIR.resolve() in candidate.parents:
+        from fastapi.responses import FileResponse
+
         return FileResponse(candidate)
+    from fastapi.responses import FileResponse
+
     return FileResponse(DIST_DIR / "index.html")
 
 
