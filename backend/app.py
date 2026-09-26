@@ -8,7 +8,7 @@ from fastapi import Body, FastAPI, HTTPException
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
-from .core.config import DB_PATH, DIST_DIR, PROJECT_ID
+from .core.config import DATA_DIR, DB_PATH, DIST_DIR, PROJECT_ID
 from .core.database import init_database
 from .domain.repository import (
     activate_version,
@@ -62,6 +62,29 @@ from .domain.character_assets import (
     unlock_character,
 )
 from .domain.seed import seed_legacy_project
+from .domain.audio_engine import (
+    activate_take,
+    audio_status,
+    create_audio_clip,
+    create_dialogue_line,
+    create_voice_profile,
+    direct_performance,
+    extract_dialogue_lines,
+    generate_dialogue_line,
+    generate_episode_dialogue,
+    list_audio_clips,
+    list_dialogue_lines,
+    list_takes,
+    list_voice_profiles,
+    lock_voice_profile,
+    mixdown_episode,
+    patch_dialogue_line,
+    patch_voice_profile,
+    provider_definitions,
+    run_qc,
+    test_voice_profile,
+    unlock_voice_profile,
+)
 from .providers.registry import ProviderRegistry
 from .services.export_service import export_project_package
 from .services.asset_generation_service import generate_asset_image
@@ -275,6 +298,21 @@ async def export_project(project_id: str) -> Response:
         raise not_found(str(error)) from error
 
 
+@app.get("/api/projects/{project_id}/audio-clips")
+async def get_project_audio_clips(project_id: str, episodeId: Optional[str] = None) -> dict[str, Any]:
+    return {"items": list_audio_clips(project_id, episodeId)}
+
+
+@app.post("/api/projects/{project_id}/audio-clips")
+async def post_project_audio_clip(project_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return {"clip": create_audio_clip(project_id, payload)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
 @app.post("/api/projects/{project_id}/{asset_type}")
 async def post_asset(project_id: str, asset_type: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     if asset_type not in {"characters", "locations", "props"}:
@@ -295,6 +333,186 @@ async def generate_asset(project_id: str, payload: Optional[dict[str, Any]] = Bo
         raise not_found(str(error)) from error
     except (RuntimeError, TimeoutError) as error:
         raise HTTPException(status_code=502, detail=str(error)) from error
+
+
+# Audio Engine -----------------------------------------------------------
+@app.get("/api/characters/{character_id}/voice-profiles")
+async def get_voice_profiles(character_id: str) -> dict[str, Any]:
+    try:
+        return {"items": list_voice_profiles(character_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/characters/{character_id}/voice-profiles")
+async def post_voice_profile(character_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return {"profile": create_voice_profile(character_id, payload)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.patch("/api/voice-profiles/{profile_id}")
+async def patch_voice_profile_resource(profile_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return {"profile": patch_voice_profile(profile_id, payload)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/voice-profiles/{profile_id}/lock")
+async def post_voice_profile_lock(profile_id: str) -> dict[str, Any]:
+    try:
+        return {"profile": lock_voice_profile(profile_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/voice-profiles/{profile_id}/unlock")
+async def post_voice_profile_unlock(profile_id: str) -> dict[str, Any]:
+    try:
+        return {"profile": unlock_voice_profile(profile_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/voice-profiles/{profile_id}/test")
+async def post_voice_profile_test(profile_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    try:
+        result = test_voice_profile(profile_id, payload or {})
+        task_engine.wake()
+        return {**result, "task": task_response(result["taskId"])}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/api/scenes/{scene_id}/dialogue-lines")
+async def get_scene_dialogue_lines(scene_id: str) -> dict[str, Any]:
+    try:
+        return {"items": list_dialogue_lines(scene_id=scene_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/scenes/{scene_id}/dialogue-lines/extract")
+async def post_scene_dialogue_extract(scene_id: str) -> dict[str, Any]:
+    try:
+        return {"items": extract_dialogue_lines(scene_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/scenes/{scene_id}/dialogue-lines")
+async def post_scene_dialogue_line(scene_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return {"line": create_dialogue_line(scene_id, payload)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/episodes/{episode_id}/dialogue-lines")
+async def get_episode_dialogue_lines(episode_id: str) -> dict[str, Any]:
+    return {"items": list_dialogue_lines(episode_id=episode_id)}
+
+
+@app.post("/api/episodes/{episode_id}/generate-dialogue")
+async def post_episode_generate_dialogue(episode_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    try:
+        result = generate_episode_dialogue(episode_id, payload or {})
+        task_engine.wake()
+        return {**result, "tasks": [task_response(item["taskId"]) for item in result["created"]]}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/episodes/{episode_id}/audio-status")
+async def get_episode_audio_status(episode_id: str) -> dict[str, Any]:
+    return audio_status(episode_id)
+
+
+@app.patch("/api/dialogue-lines/{line_id}")
+async def patch_dialogue_line_resource(line_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return {"line": patch_dialogue_line(line_id, payload)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/dialogue-lines/{line_id}/direct-performance")
+async def post_direct_performance(line_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    try:
+        return {"performance": direct_performance(line_id, payload or {})}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/dialogue-lines/{line_id}/generate")
+async def post_dialogue_generate(line_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    try:
+        result = generate_dialogue_line(line_id, payload or {})
+        task_engine.wake()
+        return {**result, "task": task_response(result["taskId"])}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/api/dialogue-lines/{line_id}/takes")
+async def get_dialogue_takes(line_id: str) -> dict[str, Any]:
+    try:
+        return {"items": list_takes(line_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/voice-takes/{take_id}/activate")
+async def post_take_activate(take_id: str) -> dict[str, Any]:
+    try:
+        return {"take": activate_take(take_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/voice-takes/{take_id}/run-qc")
+async def post_take_qc(take_id: str) -> dict[str, Any]:
+    try:
+        return run_qc(take_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/voice-providers")
+async def get_voice_providers() -> dict[str, Any]:
+    return {"items": provider_definitions(), "provider": registry.summary()}
+
+
+@app.post("/api/episodes/{episode_id}/mixdown")
+async def post_episode_mixdown(episode_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    try:
+        return {"mixdown": mixdown_episode(episode_id, payload or {})}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/generated-media/{filename}")
+async def get_generated_media(filename: str):
+    from fastapi.responses import FileResponse
+
+    candidate = (DATA_DIR / "generated-audio" / filename).resolve()
+    if DATA_DIR.resolve() not in candidate.parents or not candidate.is_file():
+        raise not_found("音频文件不存在")
+    return FileResponse(candidate)
 
 
 # Character Asset Engine -------------------------------------------------

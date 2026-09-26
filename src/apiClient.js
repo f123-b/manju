@@ -186,3 +186,63 @@ export function exportRemoteProject() {
     return response.blob();
   });
 }
+
+export function getRemoteVoiceProfiles(characterId) {
+  return request(`/characters/${characterId}/voice-profiles`).then((response) => response.items || []);
+}
+
+export function createRemoteVoiceProfile(characterId, payload) {
+  return request(`/characters/${characterId}/voice-profiles`, { method: "POST", body: JSON.stringify(payload) }).then((response) => response.profile);
+}
+
+export function patchRemoteVoiceProfile(profileId, patch) {
+  return request(`/voice-profiles/${profileId}`, { method: "PATCH", body: JSON.stringify(patch) }).then((response) => response.profile);
+}
+
+export function lockRemoteVoiceProfile(profileId) {
+  return request(`/voice-profiles/${profileId}/lock`, { method: "POST" }).then((response) => response.profile);
+}
+
+export function unlockRemoteVoiceProfile(profileId) {
+  return request(`/voice-profiles/${profileId}/unlock`, { method: "POST" }).then((response) => response.profile);
+}
+
+export function extractRemoteDialogueLines(sceneId) {
+  return request(`/scenes/${sceneId}/dialogue-lines/extract`).then((response) => response.items || []);
+}
+
+export function getRemoteDialogueLines(sceneId) {
+  return request(`/scenes/${sceneId}/dialogue-lines`).then((response) => response.items || []);
+}
+
+export function patchRemoteDialogueLine(lineId, patch) {
+  return request(`/dialogue-lines/${lineId}`, { method: "PATCH", body: JSON.stringify(patch) }).then((response) => response.line);
+}
+
+export function directRemotePerformance(lineId, payload = {}) {
+  return request(`/dialogue-lines/${lineId}/direct-performance`, { method: "POST", body: JSON.stringify(payload) }).then((response) => response.performance);
+}
+
+export function generateRemoteDialogueLine(lineId, payload = {}) {
+  return request(`/dialogue-lines/${lineId}/generate`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function generateRemoteEpisodeDialogue(episodeId, payload = {}) {
+  return request(`/episodes/${episodeId}/generate-dialogue`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function runRemoteTakeQC(takeId) {
+  return request(`/voice-takes/${takeId}/run-qc`, { method: "POST" });
+}
+
+export function activateRemoteTake(takeId) {
+  return request(`/voice-takes/${takeId}/activate`, { method: "POST" }).then((response) => response.take);
+}
+
+export function createRemoteAudioClip(payload) {
+  return request("/projects/P001/audio-clips", { method: "POST", body: JSON.stringify(payload) }).then((response) => response.clip);
+}
+
+export function mixdownRemoteEpisode(episodeId) {
+  return request(`/episodes/${episodeId}/mixdown`, { method: "POST", body: JSON.stringify({}) }).then((response) => response.mixdown);
+}

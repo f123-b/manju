@@ -2,6 +2,7 @@ node_modules/
 .npm-cache/
 dist/
 data/*.sqlite3
+data/generated-audio/
 .env
 __pycache__/
 *.pyc

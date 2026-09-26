@@ -18,7 +18,7 @@ from ..domain.repository import (
 from ..providers.registry import ProviderRegistry
 
 
-KIND_BY_TASK_TYPE = {"视频": "video", "图片": "image", "文本": "text", "语音": "voice"}
+KIND_BY_TASK_TYPE = {"视频": "video", "图片": "image", "文本": "text", "语音": "audio", "音频": "audio"}
 PENDING_STATUSES = {"Queued", "Retrying", "Running", "Processing", "Pending"}
 
 
@@ -134,6 +134,7 @@ class TaskEngine:
             "output_url": result.get("output_url") or result.get("outputUrl") or result.get("video_url") or result.get("url"),
             "cost": result.get("cost"),
             "qc_score": result.get("qc_score") or result.get("qcScore") or 91,
+            "duration_ms": result.get("duration_ms") or result.get("durationMs"),
         })
 
 

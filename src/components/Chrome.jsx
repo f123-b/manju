@@ -14,6 +14,7 @@ import {
   Robot,
   Sparkle,
   SquaresFour,
+  SpeakerHigh,
 } from "@phosphor-icons/react";
 
 const navItems = [
@@ -25,6 +26,7 @@ const navItems = [
   { label: "生图", icon: Sparkle },
   { label: "分镜", icon: SquaresFour },
   { label: "生成", icon: Sparkle },
+  { label: "声音", icon: SpeakerHigh },
   { label: "时间线", icon: Clock },
   { label: "质检", icon: CheckCircle },
   { label: "导出", icon: Export },

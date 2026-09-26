@@ -24,8 +24,20 @@ import {
   rejectRemoteReference,
   extractRemoteAnchors,
   createRemoteCharacterLook,
+  activateRemoteTake,
+  createRemoteAudioClip,
+  createRemoteVoiceProfile,
+  directRemotePerformance,
+  extractRemoteDialogueLines,
+  generateRemoteDialogueLine,
+  generateRemoteEpisodeDialogue,
   lockRemoteCharacter,
+  lockRemoteVoiceProfile,
+  mixdownRemoteEpisode,
   unlockRemoteCharacter,
+  unlockRemoteVoiceProfile,
+  patchRemoteDialogueLine,
+  patchRemoteVoiceProfile,
   patchRemoteCharacter,
   setRemoteCanonical,
   patchRemoteAsset,
@@ -35,6 +47,7 @@ import {
   patchRemoteShot,
   patchRemoteStoryBible,
   retryRemoteTask,
+  runRemoteTakeQC,
   saveRemoteProject,
 } from "./apiClient.js";
 import {
@@ -300,6 +313,107 @@ export function App() {
         setProject(await getRemoteProject());
         notify("已添加角色造型");
         return response;
+      });
+    },
+    createVoiceProfile: (characterId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteVoiceProfile(characterId, payload).then(async (profile) => {
+        setProject(await getRemoteProject());
+        notify("声音档案已创建");
+        return profile;
+      });
+    },
+    patchVoiceProfile: (profileId, patch) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteVoiceProfile(profileId, patch).then(async (profile) => {
+        setProject(await getRemoteProject());
+        return profile;
+      });
+    },
+    lockVoiceProfile: (profileId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return lockRemoteVoiceProfile(profileId).then(async (profile) => {
+        setProject(await getRemoteProject());
+        notify("声音身份已锁定");
+        return profile;
+      });
+    },
+    unlockVoiceProfile: (profileId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return unlockRemoteVoiceProfile(profileId).then(async (profile) => {
+        setProject(await getRemoteProject());
+        notify("声音身份已解锁");
+        return profile;
+      });
+    },
+    extractDialogueLines: (sceneId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return extractRemoteDialogueLines(sceneId).then(async (lines) => {
+        setProject(await getRemoteProject());
+        notify(`已提取 ${lines.length} 条台词`);
+        return lines;
+      });
+    },
+    patchDialogueLine: (lineId, patch) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteDialogueLine(lineId, patch).then(async (line) => {
+        setProject(await getRemoteProject());
+        return line;
+      });
+    },
+    directPerformance: (lineId, payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return directRemotePerformance(lineId, payload).then(async (performance) => {
+        setProject(await getRemoteProject());
+        notify("AI Voice Direction 已生成");
+        return performance;
+      });
+    },
+    generateDialogue: (lineId, payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteDialogueLine(lineId, payload).then((response) => {
+        pollRemoteGeneration(response.taskId, `台词 ${lineId}`);
+        notify("音频已进入持久任务队列");
+        return response;
+      });
+    },
+    generateEpisodeDialogue: (episodeId, payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteEpisodeDialogue(episodeId, payload).then((response) => {
+        (response.tasks || []).forEach((task) => pollRemoteGeneration(task.id, `台词 ${task.targetId || task.id}`));
+        notify(`已创建 ${response.count || 0} 个音频任务`);
+        return response;
+      });
+    },
+    runTakeQC: (takeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return runRemoteTakeQC(takeId).then(async (result) => {
+        setProject(await getRemoteProject());
+        notify(`音频 QC ${result.status === "pass" ? "通过" : "需要复核"}`);
+        return result;
+      });
+    },
+    activateTake: (takeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return activateRemoteTake(takeId).then(async (take) => {
+        setProject(await getRemoteProject());
+        notify("已启用该版音频");
+        return take;
+      });
+    },
+    createAudioClip: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteAudioClip(payload).then(async (clip) => {
+        setProject(await getRemoteProject());
+        return clip;
+      });
+    },
+    mixdownEpisode: (episodeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return mixdownRemoteEpisode(episodeId).then(async (mixdown) => {
+        setProject(await getRemoteProject());
+        notify("本集混音已生成");
+        return mixdown;
       });
     },
     saveScene: (sceneId, patch) => {

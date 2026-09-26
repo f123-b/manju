@@ -81,6 +81,8 @@ def init_database() -> None:
         connection.execute("CREATE INDEX IF NOT EXISTS idx_shot_characters_look ON shot_characters(look_id, shot_id)")
         character_migration = ROOT / "backend" / "migrations" / "002_character_engine.sql"
         connection.executescript(character_migration.read_text(encoding="utf-8"))
+        audio_migration = ROOT / "backend" / "migrations" / "003_audio_engine.sql"
+        connection.executescript(audio_migration.read_text(encoding="utf-8"))
         connection.execute("UPDATE shot_characters SET id = 'SCB-' || lower(hex(randomblob(6))) WHERE id IS NULL")
         connection.execute("UPDATE shot_characters SET position = (SELECT COUNT(*) FROM shot_characters earlier WHERE earlier.shot_id = shot_characters.shot_id AND earlier.rowid <= shot_characters.rowid) - 1 WHERE position = 0")
         has_projects = connection.execute("SELECT 1 FROM projects LIMIT 1").fetchone()
@@ -97,6 +99,9 @@ def init_database() -> None:
     from ..domain.character_assets import migrate_legacy_character_assets
 
     migrate_legacy_character_assets()
+    from ..domain.audio_engine import migrate_legacy_audio
+
+    migrate_legacy_audio()
 
 
 def _ensure_generation_task_targets(connection: sqlite3.Connection) -> None:

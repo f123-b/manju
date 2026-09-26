@@ -131,6 +131,7 @@ def _asset_url(connection: sqlite3.Connection, asset_id: str | None) -> str | No
 
 def project_to_dict(project_id: str) -> dict[str, Any]:
     from .character_assets import character_dict
+    from .audio_engine import list_audio_clips, list_dialogue_lines, list_mixdowns
 
     with session() as connection:
         project = _project_row(connection, project_id)
@@ -151,6 +152,9 @@ def project_to_dict(project_id: str) -> dict[str, Any]:
         locations = connection.execute("SELECT * FROM locations WHERE project_id = ? AND archived = 0 ORDER BY id", (project_id,)).fetchall()
         props = connection.execute("SELECT * FROM props WHERE project_id = ? AND archived = 0 ORDER BY id", (project_id,)).fetchall()
         tasks = connection.execute("SELECT * FROM generation_tasks WHERE project_id = ? ORDER BY created_at DESC", (project_id,)).fetchall()
+        audio_lines = list_dialogue_lines(project_id=project_id)
+        audio_clips = list_audio_clips(project_id)
+        audio_mixdowns = list_mixdowns(project_id)
         current_scene = connection.execute(
             """
             SELECT s.* FROM scenes s JOIN episodes e ON e.id = s.episode_id
@@ -200,6 +204,16 @@ def project_to_dict(project_id: str) -> dict[str, Any]:
                 "characters": [character_dict(connection, item) for item in characters],
                 "locations": [{"id": item["id"], "name": item["name"], "meta": item["meta"], "description": item["description"], "image": item["image"], "status": item["status"]} for item in locations],
                 "props": [{"id": item["id"], "name": item["name"], "meta": item["meta"], "description": item["description"], "image": item["image"], "status": item["status"]} for item in props],
+            },
+            "audio": {
+                "dialogueLines": audio_lines,
+                "clips": audio_clips,
+                "mixdowns": audio_mixdowns,
+                "counts": {
+                    "lines": len(audio_lines),
+                    "ready": sum(1 for line in audio_lines if line.get("activeTake")),
+                    "stale": sum(1 for line in audio_lines if line.get("stale")),
+                },
             },
             "tasks": [{"id": item["id"], "shotId": item["shot_id"], "targetType": item["target_type"], "targetId": item["target_id"], "type": item["type"], "model": item["model"], "status": item["status"], "cost": round(float(item["actual_cost"] if item["actual_cost"] is not None else item["estimated_cost"]), 2), "createdAt": item["created_at"], "error": item["error_message"], "progress": item["progress"]} for item in tasks],
         }
@@ -516,6 +530,25 @@ def complete_generation_task(task_id: str, result: dict[str, Any]) -> str:
         task = connection.execute("SELECT * FROM generation_tasks WHERE id = ?", (task_id,)).fetchone()
         if not task:
             raise KeyError(f"task {task_id} not found")
+        if task["target_type"] == "voice_take":
+            output_url = result.get("output_url") or result.get("audio_url") or result.get("url")
+            media_asset_id = None
+            if output_url:
+                media_asset_id = new_id("MEDIA-")
+                connection.execute(
+                    "INSERT INTO media_assets(id, project_id, type, path_or_url, source, provider, model, prompt, metadata_json) VALUES (?, ?, 'voice_take', ?, 'provider', ?, ?, ?, ?)",
+                    (media_asset_id, task["project_id"], output_url, task["provider"], task["model"], task["prompt"], dumps({"targetType": task["target_type"], "targetId": task["target_id"], "durationMs": result.get("duration_ms")})),
+                )
+            actual_cost = round(float(result.get("cost") or task["estimated_cost"] or 0), 2)
+            connection.execute(
+                "UPDATE voice_takes SET media_asset_id = ?, duration_ms = COALESCE(?, duration_ms), actual_cost = ?, status = 'success', qc_status = 'pending', updated_at = ? WHERE id = ?",
+                (media_asset_id, result.get("duration_ms"), actual_cost, now_text(), task["target_id"]),
+            )
+            connection.execute("UPDATE dialogue_lines SET status = 'generated', updated_at = ? WHERE id = (SELECT dialogue_line_id FROM voice_takes WHERE id = ?)", (now_text(), task["target_id"]))
+            connection.execute("UPDATE generation_tasks SET status = 'Success', progress = 100, actual_cost = ?, completed_at = ?, updated_at = ? WHERE id = ?", (actual_cost, now_text(), now_text(), task_id))
+            connection.execute("UPDATE projects SET spent = spent + ?, updated_at = ? WHERE id = ?", (actual_cost, now_text(), task["project_id"]))
+            connection.execute("INSERT INTO cost_records(id, project_id, task_id, provider, model, category, estimated_cost, actual_cost, status) VALUES (?, ?, ?, ?, ?, 'voice', ?, ?, 'actual')", (new_id("COST-"), task["project_id"], task_id, task["provider"], task["model"], task["estimated_cost"], actual_cost))
+            return task["project_id"]
         if task["target_type"] == "character_reference":
             output_url = result.get("output_url") or result.get("image_url") or result.get("url") or "/assets/shot-hero.png"
             media_asset_id = new_id("MEDIA-")

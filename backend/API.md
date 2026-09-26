@@ -20,6 +20,21 @@ GET       /api/shots/{shot_id}/versions
 POST      /api/versions/{version_id}/activate
 GET       /api/projects/{project_id}/costs|qc
 POST      /api/projects/{project_id}/export
+
+# Audio Engine V1
+GET/POST   /api/characters/{character_id}/voice-profiles
+PATCH      /api/voice-profiles/{profile_id}
+POST       /api/voice-profiles/{profile_id}/lock|unlock|test
+GET/POST   /api/scenes/{scene_id}/dialogue-lines
+POST       /api/scenes/{scene_id}/dialogue-lines/extract
+GET        /api/episodes/{episode_id}/dialogue-lines|audio-status
+POST       /api/episodes/{episode_id}/generate-dialogue|mixdown
+PATCH      /api/dialogue-lines/{line_id}
+POST       /api/dialogue-lines/{line_id}/direct-performance|generate
+GET        /api/dialogue-lines/{line_id}/takes
+POST       /api/voice-takes/{take_id}/activate|run-qc
+GET        /api/voice-providers
+GET/POST   /api/projects/{project_id}/audio-clips
 ```
 
 生成任务会先写入 `generation_tasks` 的 `Queued` 状态，由独立后台 worker 领取；服务重启会把未完成的 `Running` 任务恢复为 `Queued`，不会依赖请求协程存活。
@@ -68,4 +83,13 @@ SHORT_DRAMA_PROVIDER_MODEL=video-default
 SHORT_DRAMA_ESTIMATED_COST=0.73
 SHORT_DRAMA_PROVIDER_AUTH_HEADER=Authorization
 SHORT_DRAMA_PROVIDER_AUTH_PREFIX=Bearer
+
+# Optional external voice runtimes. If unset, the deterministic local WAV
+# provider is used for development and tests; no TTS model is bundled.
+SHORT_DRAMA_COSYVOICE_URL=http://127.0.0.1:50000/inference_sft
+SHORT_DRAMA_CHATTERBOX_URL=
+SHORT_DRAMA_GPTSOVITS_URL=
+SHORT_DRAMA_VOICE_PROVIDER=cosyvoice
+SHORT_DRAMA_VOICE_PROVIDER_MODEL=voice-default
+SHORT_DRAMA_VOICE_ESTIMATED_COST=0.08
 ```

@@ -12,6 +12,7 @@ import {
   Play,
   Robot,
   Sparkle,
+  SpeakerHigh,
   Stop,
   Trash,
   Warning,
@@ -209,6 +210,10 @@ function ScriptPage({ project, actions }) {
   }, [episodeId]);
 
   useEffect(() => {
+    if (episodeId && project.currentEpisodeId !== episodeId) actions.updateProject({ currentEpisodeId: episodeId });
+  }, [episodeId]);
+
+  useEffect(() => {
     if (!scene) {
       setSceneDraft({ title: "", purpose: "", summary: "", timeOfDay: "" });
       setScriptDraft("");
@@ -377,11 +382,76 @@ function GenerationPage({ project, onRetry, onCancel, onNavigate }) {
   </div>;
 }
 
-function TimelinePage({ project }) {
+function AudioPage({ project, actions }) {
+  const [episodeId, setEpisodeId] = useState(() => project.audio?.dialogueLines?.[0]?.episodeId || project.currentEpisodeId);
+  const [sceneId, setSceneId] = useState(project.currentScene?.id || null);
+  const [scenes, setScenes] = useState([]);
+  const [selectedLineId, setSelectedLineId] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [emotion, setEmotion] = useState("克制");
+  const [speed, setSpeed] = useState("1");
+
+  useEffect(() => {
+    let active = true;
+    actions.loadScenes(episodeId).then((items) => {
+      if (!active) return;
+      setScenes(items);
+      setSceneId((current) => items.some((item) => item.id === current) ? current : items[0]?.id || null);
+    }).catch(() => active && setNotice("场景读取失败，请检查 FastAPI"));
+    return () => { active = false; };
+  }, [episodeId]);
+
+  const lines = (project.audio?.dialogueLines || []).filter((line) => line.episodeId === episodeId && (!sceneId || line.sceneId === sceneId));
+  const selectedLine = lines.find((line) => line.id === selectedLineId) || lines[0];
+  const selectedProfile = selectedLine?.voiceProfile;
+  const episode = project.episodes.find((item) => item.id === episodeId);
+
+  useEffect(() => {
+    if (selectedLine) {
+      setSelectedLineId(selectedLine.id);
+      setEmotion(selectedLine.performance?.emotion || "克制");
+      setSpeed(String(selectedLine.performance?.speed || 1));
+    }
+  }, [selectedLine?.id]);
+
+  const run = async (operation, message) => {
+    setBusy(true);
+    setNotice("");
+    try {
+      await operation();
+      setNotice(message);
+    } catch (error) {
+      setNotice(error?.message || "操作失败，请稍后重试");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const activeTake = selectedLine?.activeTake || selectedLine?.takes?.[0];
+  return <div className="module-page audio-page">
+    <PageHeader eyebrow="Audio Engine" title="声音工作台" description="从场景台词开始，选择稳定声音身份，生成逐句 Take，完成 QC 后再放进独立音频轨道。" action={<span className={`audio-runtime ${actions.backendStatus}`}>{actions.backendStatus === "online" ? "Audio API 已连接" : "等待 API"}</span>} />
+    <div className="audio-toolbar module-section">
+      <label>剧集<select value={episodeId} onChange={(event) => { setEpisodeId(event.target.value); actions.updateProject({ currentEpisodeId: event.target.value }); }}><option value="">选择剧集</option>{project.episodes.map((item) => <option key={item.id} value={item.id}>{item.id} · {item.title}</option>)}</select></label>
+      <label>场景<select value={sceneId || ""} onChange={(event) => setSceneId(event.target.value)}><option value="">全部场景</option>{scenes.map((item) => <option key={item.id} value={item.id}>{item.id} · {item.title}</option>)}</select></label>
+      <div className="audio-toolbar-actions"><button type="button" onClick={() => run(() => actions.extractDialogueLines(sceneId), "已从镜头对白提取台词")} disabled={!sceneId || busy}><SpeakerHigh size={15} />提取台词</button><button className="primary-action" type="button" onClick={() => run(() => actions.generateEpisodeDialogue(episodeId, { sceneId }), "本集音频任务已创建")} disabled={!lines.length || busy}><Sparkle size={15} />生成本集音频</button></div>
+    </div>
+    {notice && <div className="audio-notice">{notice}</div>}
+    <div className="audio-workspace">
+      <section className="module-section audio-lines-panel"><div className="section-heading"><div><h2>{episode?.id} 台词行</h2><p>{lines.length} 条对白 · 每条都可以独立重生成和审核</p></div><span className="audio-count">{project.audio?.counts?.ready || 0} 已就绪</span></div>{!lines.length ? <div className="audio-empty"><SpeakerHigh size={26} /><strong>还没有提取台词</strong><span>先选择一个有镜头对白的场景。</span></div> : <div className="audio-line-list">{lines.map((line) => <button type="button" key={line.id} className={selectedLine?.id === line.id ? "is-active" : ""} onClick={() => setSelectedLineId(line.id)}><span className="audio-line-index">{String(line.order + 1).padStart(2, "0")}</span><span className="audio-line-copy"><strong>{line.characterName}</strong><em>{line.text}</em><small>{line.shotId || "场景台词"} · 目标 {Math.round((line.targetDurationMs || 0) / 1000)}s</small></span><span className={`audio-line-status ${line.status}`}>{line.activeTake ? "可用" : line.status === "queued" ? "排队" : "待生成"}</span></button>)}</div>}</section>
+      <section className="module-section audio-inspector"><div className="section-heading"><div><h2>{selectedLine ? selectedLine.characterName : "台词检查"}</h2><p>{selectedLine ? selectedLine.id : "选择左侧台词开始"}</p></div>{selectedLine?.stale && <span className="audio-stale">需要重生成</span>}</div>{selectedLine ? <><div className="audio-text-card"><span>Dialogue Line</span><p>{selectedLine.text}</p><small>目标时长 {selectedLine.targetDurationMs || "未设置"} ms · {selectedLine.language}</small></div><div className="audio-inspector-block"><div className="section-heading"><div><h3>Voice Identity</h3><p>身份与表现分开管理</p></div>{selectedProfile?.locked && <span className="audio-lock">Locked</span>}</div>{selectedProfile ? <div className="audio-profile-card"><div><strong>{selectedProfile.name}</strong><small>{selectedProfile.providerType} · 权利：{selectedProfile.consentStatus}</small></div>{selectedProfile.locked ? <button type="button" onClick={() => run(() => actions.unlockVoiceProfile(selectedProfile.id), "声音档案已解锁")} disabled={busy}>解锁</button> : <><button type="button" onClick={() => run(() => actions.patchVoiceProfile(selectedProfile.id, { consentStatus: "user_owned" }), "已登记声音权利")} disabled={busy || selectedProfile.consentStatus === "user_owned"}>登记自有</button><button type="button" onClick={() => run(() => actions.lockVoiceProfile(selectedProfile.id), "声音档案已锁定")} disabled={busy || !["user_owned", "licensed", "approved"].includes(selectedProfile.consentStatus)}>锁定</button></>}</div> : <p className="audio-muted">该角色还没有声音档案，请先在素材库的角色页创建。</p>}</div><div className="audio-inspector-block"><div className="section-heading"><div><h3>AI Voice Direction</h3><p>情绪、速度和交付指令属于当前台词</p></div><button type="button" onClick={() => run(() => actions.directPerformance(selectedLine.id, { emotion, speed: Number(speed) }), "Voice Direction 已更新")} disabled={busy}>生成</button></div><div className="audio-control-grid"><label>情绪<select value={emotion} onChange={(event) => setEmotion(event.target.value)}>{["克制", "坚定", "惊讶", "悲伤", "愤怒", "温柔"].map((item) => <option key={item}>{item}</option>)}</select></label><label>速度<select value={speed} onChange={(event) => setSpeed(event.target.value)}><option value="0.85">0.85×</option><option value="1">1.0×</option><option value="1.15">1.15×</option></select></label></div><p className="audio-delivery">{selectedLine.performance?.deliveryInstruction || "先稳住情绪，再把关键词说清楚"}</p></div><div className="audio-inspector-block"><div className="section-heading"><div><h3>Voice Takes <span>{selectedLine.takes?.length || 0}</span></h3><p>Take 是不可变版本，QC 通过后才能进入时间线</p></div><button className="primary-action" type="button" onClick={() => run(() => actions.generateDialogue(selectedLine.id, {}), "音频已进入任务队列")} disabled={busy || !selectedProfile}>生成一版</button></div>{selectedLine.takes?.length ? <div className="audio-take-list">{selectedLine.takes.map((take) => <div className="audio-take-row" key={take.id}><div><strong>{take.id}</strong><small>{take.provider} · {take.durationMs ? `${(take.durationMs / 1000).toFixed(1)}s` : "处理中"} · QC {take.qcScore ?? "--"}</small></div><div><button type="button" onClick={() => run(() => actions.runTakeQC(take.id), "QC 已完成")} disabled={busy || take.status !== "success"}>QC</button><button type="button" onClick={() => run(() => actions.activateTake(take.id), "已启用该 Take")} disabled={busy || take.status !== "success"}>{take.active ? "已启用" : "启用"}</button><button type="button" onClick={() => run(() => actions.createAudioClip({ takeId: take.id, episodeId, sceneId, timelineStartMs: selectedLine.startOffsetMs || 0, trackType: "dialogue" }), "已加入 Dialogue 轨道")} disabled={busy || take.status !== "success"}>入轨</button></div></div>)}</div> : <p className="audio-muted">还没有版本。生成后会显示音频文件、QC 和入轨操作。</p>}{activeTake?.qcStatus === "pass" && <div className="audio-qc-pass"><CheckCircle size={15} />QC 通过，可以进入时间线</div>}</div></> : <div className="audio-empty"><SpeakerHigh size={26} /><strong>选择一条台词</strong><span>右侧会显示声音身份、表现方向和 Take。</span></div>}</section>
+    </div>
+  </div>;
+}
+
+function TimelinePage({ project, actions }) {
   const shots = project.shots.filter((shot) => shot.episodeId === project.currentEpisodeId);
   const total = shots.reduce((sum, shot) => sum + shot.duration, 0) || 1;
-  return <div className="module-page"><PageHeader eyebrow="Timeline" title={`${project.currentEpisodeId} 轻量时间线`} description="调整镜头顺序、对白和时长；复杂剪辑可在导出后继续完成。" />
-    <section className="module-section timeline-editor"><div className="timeline-ruler">{Array.from({ length: Math.ceil(total / 4) + 1 }, (_, index) => <span key={index}>{index * 4}s</span>)}</div><div className="timeline-track"><strong>Video</strong><div>{shots.map((shot) => <button key={shot.id} style={{ flex: Math.max(1, shot.duration) }} type="button"><img src={shot.image} alt="" /><span>{shot.id}</span><small>{shot.duration}s</small></button>)}</div></div><div className="timeline-track slim"><strong>Voice</strong><div>{shots.map((shot) => <span key={shot.id} style={{ flex: Math.max(1, shot.duration) }}>{shot.dialogue.slice(0, 8)}</span>)}</div></div><div className="timeline-track slim"><strong>Subtitle</strong><div>{shots.map((shot) => <span key={shot.id} style={{ flex: Math.max(1, shot.duration) }}>{shot.id}</span>)}</div></div></section>
+  const audioClips = (project.audio?.clips || []).filter((clip) => clip.episodeId === project.currentEpisodeId);
+  const audioLines = (project.audio?.dialogueLines || []).filter((line) => line.episodeId === project.currentEpisodeId);
+  const tracks = ["dialogue", "sfx", "ambience", "bgm"];
+  return <div className="module-page"><PageHeader eyebrow="Timeline" title={`${project.currentEpisodeId} 轻量时间线`} description="画面、对白和音乐分轨管理；先把每句对白审核通过，再生成本集混音。" action={<button className="primary-action" type="button" onClick={() => actions.mixdownEpisode(project.currentEpisodeId)}><SpeakerHigh size={17} />生成混音</button>} />
+    <section className="module-section timeline-editor"><div className="timeline-ruler">{Array.from({ length: Math.ceil(total / 4) + 1 }, (_, index) => <span key={index}>{index * 4}s</span>)}</div><div className="timeline-track"><strong>Video</strong><div>{shots.map((shot) => <button key={shot.id} style={{ flex: Math.max(1, shot.duration) }} type="button"><img src={shot.image} alt="" /><span>{shot.id}</span><small>{shot.duration}s</small></button>)}</div></div>{tracks.map((track) => <div className="timeline-track slim" key={track}><strong>{track === "dialogue" ? "Dialogue" : track.toUpperCase()}</strong><div>{audioClips.filter((clip) => clip.trackType === track).map((clip) => <span key={clip.id} style={{ flex: Math.max(1, (clip.durationMs || 1000) / 1000) }}>{clip.linkedDialogueLineId || `${track} clip`} · {Math.round((clip.durationMs || 0) / 1000)}s</span>)}{!audioClips.some((clip) => clip.trackType === track) && <span className="timeline-empty-track">{track === "dialogue" ? `${audioLines.filter((line) => line.activeTake).length} 条可用对白，去声音工作台入轨` : "空轨道"}</span>}</div></div>)}</section>
   </div>;
 }
 
@@ -412,7 +482,8 @@ export function ModulePage({ activeNav, project, stats, actions }) {
   if (activeNav === "素材库") return <AssetsPage project={project} onAddAsset={actions.addAsset} onUpdateAsset={actions.updateAsset} actions={actions} />;
   if (activeNav === "生图") return <AssetGenerationPage project={project} actions={actions} />;
   if (activeNav === "生成") return <GenerationPage project={project} onRetry={actions.retryTask} onCancel={actions.cancelTask} onNavigate={actions.navigate} />;
-  if (activeNav === "时间线") return <TimelinePage project={project} />;
+  if (activeNav === "声音") return <AudioPage project={project} actions={actions} />;
+  if (activeNav === "时间线") return <TimelinePage project={project} actions={actions} />;
   if (activeNav === "质检") return <QCPage project={project} onReviewShot={actions.reviewShot} onRegenerate={actions.regenerateShot} />;
   if (activeNav === "导出") return <ExportPage project={project} onExport={actions.exportProject} />;
   return <SettingsPage project={project} onUpdateProject={actions.updateProject} backendStatus={actions.backendStatus} providerInfo={actions.providerInfo} />;
