@@ -39,6 +39,28 @@ from .domain.repository import (
     project_to_dict,
     retry_generation_task,
 )
+from .domain.character_assets import (
+    affected_shots_for_character,
+    bind_shot_characters,
+    create_character,
+    create_look,
+    create_reference,
+    extract_identity_anchors,
+    generate_character_candidates,
+    generate_master_sheet,
+    get_character,
+    get_shot_characters,
+    list_characters,
+    list_looks,
+    list_references,
+    lock_character,
+    patch_character,
+    patch_look,
+    review_reference,
+    set_canonical_reference,
+    shot_generation_context,
+    unlock_character,
+)
 from .domain.seed import seed_legacy_project
 from .providers.registry import ProviderRegistry
 from .services.export_service import export_project_package
@@ -275,6 +297,197 @@ async def generate_asset(project_id: str, payload: Optional[dict[str, Any]] = Bo
         raise HTTPException(status_code=502, detail=str(error)) from error
 
 
+# Character Asset Engine -------------------------------------------------
+@app.get("/api/projects/{project_id}/characters")
+async def get_project_characters(project_id: str) -> dict[str, Any]:
+    project_response(project_id)
+    return {"items": list_characters(project_id)}
+
+
+@app.post("/api/projects/{project_id}/characters")
+async def post_project_character(project_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return {"character": create_character(project_id, payload)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/characters/{character_id}")
+async def get_character_resource(character_id: str) -> dict[str, Any]:
+    try:
+        return get_character(character_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.patch("/api/characters/{character_id}")
+async def patch_character_resource(character_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return patch_character(character_id, payload)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/characters/{character_id}/extract-anchors")
+async def post_character_anchors(character_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    try:
+        return {"characterId": character_id, "identityAnchors": extract_identity_anchors(character_id, payload or {})}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/characters/{character_id}/generate-candidates")
+async def post_character_candidates(character_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    try:
+        result = generate_character_candidates(character_id, payload or {})
+        task_engine.wake()
+        return {**result, "character": get_character(character_id), "tasks": [task_response(task_id) for task_id in result["taskIds"]]}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/characters/{character_id}/generate-master-sheet")
+async def post_character_master_sheet(character_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    try:
+        result = generate_master_sheet(character_id, payload or {})
+        task_engine.wake()
+        return {**result, "task": task_response(result["taskId"])}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/characters/{character_id}/canonical")
+async def post_character_canonical(character_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return set_canonical_reference(character_id, payload.get("referenceId") or payload.get("reference_id", ""))
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/characters/{character_id}/lock")
+async def post_character_lock(character_id: str) -> dict[str, Any]:
+    try:
+        return lock_character(character_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/characters/{character_id}/unlock")
+async def post_character_unlock(character_id: str) -> dict[str, Any]:
+    try:
+        return unlock_character(character_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/characters/{character_id}/looks")
+async def get_character_looks(character_id: str) -> dict[str, Any]:
+    try:
+        return {"items": list_looks(character_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/characters/{character_id}/looks")
+async def post_character_look(character_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return {"look": create_look(character_id, payload)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.patch("/api/character-looks/{look_id}")
+async def patch_character_look(look_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return patch_look(look_id, payload)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/characters/{character_id}/references")
+async def get_character_references(character_id: str) -> dict[str, Any]:
+    try:
+        return {"items": list_references(character_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/characters/{character_id}/references")
+async def post_character_reference(character_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return {"reference": create_reference(character_id, payload)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.post("/api/character-references/{reference_id}/approve")
+async def approve_character_reference(reference_id: str) -> dict[str, Any]:
+    try:
+        return {"reference": review_reference(reference_id, "approved")}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.post("/api/character-references/{reference_id}/reject")
+async def reject_character_reference(reference_id: str) -> dict[str, Any]:
+    try:
+        return {"reference": review_reference(reference_id, "rejected")}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
+@app.get("/api/characters/{character_id}/affected-shots")
+async def get_character_affected_shots(character_id: str, look_id: Optional[str] = None) -> dict[str, Any]:
+    try:
+        return affected_shots_for_character(character_id, look_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/character-looks/{look_id}/affected-shots")
+async def get_look_affected_shots(look_id: str) -> dict[str, Any]:
+    from .core.database import session
+
+    with session() as connection:
+        row = connection.execute("SELECT character_id FROM character_looks WHERE id = ?", (look_id,)).fetchone()
+    if not row:
+        raise not_found("look not found")
+    return affected_shots_for_character(row["character_id"], look_id)
+
+
+@app.get("/api/shots/{shot_id}/characters")
+async def get_shot_character_bindings(shot_id: str) -> dict[str, Any]:
+    try:
+        return {"items": get_shot_characters(shot_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.put("/api/shots/{shot_id}/characters")
+async def put_shot_character_bindings(shot_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    bindings = payload.get("items") if isinstance(payload, dict) else payload
+    try:
+        return {"items": bind_shot_characters(shot_id, bindings or [])}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+
+
 @app.patch("/api/assets/{asset_id}")
 async def patch_asset_resource(asset_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     try:
@@ -297,12 +510,13 @@ async def generate_shot(shot_id: str, payload: Optional[dict[str, Any]] = Body(d
     provider = payload.get("provider") or summary["provider"]
     model = payload.get("model") or (registry.external_model if summary["mode"] == "remote" else "mock-video")
     estimated_cost = float(payload.get("estimatedCost") or (0.73 if summary["mode"] == "demo" else os.environ.get("SHORT_DRAMA_ESTIMATED_COST", "0.73")))
+    reference_context = shot_generation_context(shot_id)
     try:
-        project_id, task_id = create_generation_task(shot_id, payload.get("prompt") or shot.get("prompt", ""), provider, model, estimated_cost)
+        project_id, task_id = create_generation_task(shot_id, payload.get("prompt") or shot.get("prompt", ""), provider, model, estimated_cost, {"references": reference_context["references"]})
     except KeyError as error:
         raise not_found(str(error)) from error
     task_engine.wake()
-    return {"task": task_response(task_id), "project": project_response(project_id), "provider": provider}
+    return {"task": task_response(task_id), "project": project_response(project_id), "provider": provider, "references": reference_context["references"]}
 
 
 @app.get("/api/generation-tasks/{task_id}")

@@ -13,6 +13,7 @@ from ..domain.repository import (
     generation_task,
     task_row,
     update_task_runtime,
+    loads,
 )
 from ..providers.registry import ProviderRegistry
 
@@ -82,11 +83,14 @@ class TaskEngine:
             "task_id": task_id,
             "project_id": task["project_id"],
             "shot_id": task["shot_id"],
+            "target_type": task.get("target_type", "shot"),
+            "target_id": task.get("target_id") or task.get("shot_id"),
             "prompt": task.get("prompt", ""),
-            "parameters": task.get("parameters_json", "{}"),
+            "parameters": loads(task.get("parameters_json"), {}),
             "model": task.get("model"),
             "type": kind,
         }
+        payload["references"] = payload["parameters"].get("references", [])
         update_task_runtime(task_id, {"status": "Running", "progress": 10})
         response = await provider.submit(payload)
         response = response or {}

@@ -72,6 +72,74 @@ export function generateRemoteAsset(assetType, payload = {}) {
   });
 }
 
+export function listRemoteCharacters() {
+  return request("/projects/P001/characters").then((response) => response.items || []);
+}
+
+export function createRemoteCharacter(payload) {
+  return request("/projects/P001/characters", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function patchRemoteCharacter(characterId, patch) {
+  return request(`/characters/${characterId}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function extractRemoteAnchors(characterId, payload = {}) {
+  return request(`/characters/${characterId}/extract-anchors`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function generateRemoteCandidates(characterId, payload = {}) {
+  return request(`/characters/${characterId}/generate-candidates`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function generateRemoteMasterSheet(characterId, payload = {}) {
+  return request(`/characters/${characterId}/generate-master-sheet`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function setRemoteCanonical(characterId, referenceId) {
+  return request(`/characters/${characterId}/canonical`, { method: "POST", body: JSON.stringify({ referenceId }) });
+}
+
+export function lockRemoteCharacter(characterId) {
+  return request(`/characters/${characterId}/lock`, { method: "POST" });
+}
+
+export function unlockRemoteCharacter(characterId) {
+  return request(`/characters/${characterId}/unlock`, { method: "POST" });
+}
+
+export function getRemoteCharacterLooks(characterId) {
+  return request(`/characters/${characterId}/looks`).then((response) => response.items || []);
+}
+
+export function createRemoteCharacterLook(characterId, payload) {
+  return request(`/characters/${characterId}/looks`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function patchRemoteCharacterLook(lookId, patch) {
+  return request(`/character-looks/${lookId}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function getRemoteCharacterReferences(characterId) {
+  return request(`/characters/${characterId}/references`).then((response) => response.items || []);
+}
+
+export function approveRemoteReference(referenceId) {
+  return request(`/character-references/${referenceId}/approve`, { method: "POST" });
+}
+
+export function rejectRemoteReference(referenceId) {
+  return request(`/character-references/${referenceId}/reject`, { method: "POST" });
+}
+
+export function getRemoteShotCharacters(shotId) {
+  return request(`/shots/${shotId}/characters`).then((response) => response.items || []);
+}
+
+export function putRemoteShotCharacters(shotId, items) {
+  return request(`/shots/${shotId}/characters`, { method: "PUT", body: JSON.stringify({ items }) });
+}
+
 export function patchRemoteScene(sceneId, patch) {
   return request(`/scenes/${sceneId}`, { method: "PATCH", body: JSON.stringify(patch) });
 }

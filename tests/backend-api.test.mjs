@@ -51,6 +51,70 @@ test("FastAPI boots a relational demo and completes a durable generation task", 
   assert.equal(characterAsset.asset.id, "C003");
   assert.equal(characterAsset.asset.image, "/assets/shot-hero.png");
 
+  const charactersResponse = await fetch(`http://127.0.0.1:${port}/api/projects/P001/characters`);
+  const characters = await charactersResponse.json();
+  assert.equal(characters.items[0].lookCount, 1);
+  assert.equal(characters.items[0].identityLocked, true);
+
+  const candidateResponse = await fetch(`http://127.0.0.1:${port}/api/characters/C001/generate-candidates`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ count: 4 }),
+  });
+  const candidates = await candidateResponse.json();
+  assert.equal(candidateResponse.ok, true);
+  assert.equal(candidates.referenceIds.length, 4);
+  for (const taskId of candidates.taskIds) {
+    let candidateTask;
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+      candidateTask = await (await fetch(`http://127.0.0.1:${port}/api/generation-tasks/${taskId}`)).json();
+      if (["Success", "Failed"].includes(candidateTask.status)) break;
+      await new Promise((resolve) => setTimeout(resolve, 80));
+    }
+    assert.equal(candidateTask.status, "Success");
+    assert.equal(candidateTask.targetType, "character_reference");
+  }
+  const referencesResponse = await fetch(`http://127.0.0.1:${port}/api/characters/C001/references`);
+  const references = await referencesResponse.json();
+  const candidate = references.items.find((item) => item.id === candidates.referenceIds[0]);
+  assert.equal(candidate.lifecycleStatus, "generated");
+  const approveReference = await fetch(`http://127.0.0.1:${port}/api/character-references/${candidate.id}/approve`, { method: "POST" });
+  assert.equal(approveReference.ok, true);
+  const canonicalResponse = await fetch(`http://127.0.0.1:${port}/api/characters/C001/canonical`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ referenceId: candidate.id }) });
+  assert.equal(canonicalResponse.ok, true);
+  const masterResponse = await fetch(`http://127.0.0.1:${port}/api/characters/C001/generate-master-sheet`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({}) });
+  const master = await masterResponse.json();
+  assert.equal(masterResponse.ok, true);
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const masterTask = await (await fetch(`http://127.0.0.1:${port}/api/generation-tasks/${master.taskId}`)).json();
+    if (["Success", "Failed"].includes(masterTask.status)) break;
+    await new Promise((resolve) => setTimeout(resolve, 80));
+  }
+  const approveMaster = await fetch(`http://127.0.0.1:${port}/api/character-references/${master.referenceId}/approve`, { method: "POST" });
+  assert.equal(approveMaster.ok, true);
+  const lockResponse = await fetch(`http://127.0.0.1:${port}/api/characters/C001/lock`, { method: "POST" });
+  const lockedCharacter = await lockResponse.json();
+  assert.equal(lockedCharacter.identityLocked, true);
+
+  const lookResponse = await fetch(`http://127.0.0.1:${port}/api/characters/C001/looks`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ name: "天台夜戏", differences: { wardrobe: "黑色风衣" }, validFromSceneId: "SC03" }) });
+  const look = await lookResponse.json();
+  assert.equal(lookResponse.ok, true);
+  const bindingResponse = await fetch(`http://127.0.0.1:${port}/api/shots/SH041/characters`, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ items: [{ characterId: "C001", lookId: look.look.id, primaryReferenceId: "REF-C001-LEGACY", emotion: "克制" }, { characterId: "C002", lookId: "O002", primaryReferenceId: "REF-C002-LEGACY", emotion: "迟疑" }] }) });
+  const bindings = await bindingResponse.json();
+  assert.equal(bindingResponse.ok, true);
+  assert.deepEqual(bindings.items.map((item) => item.lookId), [look.look.id, "O002"]);
+  assert.deepEqual(bindings.items.map((item) => item.emotion), ["克制", "迟疑"]);
+  const impactResponse = await fetch(`http://127.0.0.1:${port}/api/character-looks/${look.look.id}/affected-shots`);
+  const impact = await impactResponse.json();
+  assert.equal(impactResponse.ok, true);
+  assert.ok(impact.shotIds.includes("SH041"));
+  assert.ok(impact.items.some((item) => item.stale === true));
+
+  const shotGenerateWithReferences = await fetch(`http://127.0.0.1:${port}/api/shots/SH041/generate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ prompt: "带角色参考的生成" }) });
+  const shotRequest = await shotGenerateWithReferences.json();
+  assert.equal(shotRequest.references.length, 2);
+  assert.ok(shotRequest.references.every((item) => item.lifecycleStatus === "approved"));
+
   const locationAssetResponse = await fetch(`http://127.0.0.1:${port}/api/projects/P001/assets/generate`, {
     method: "POST",
     headers: { "content-type": "application/json" },

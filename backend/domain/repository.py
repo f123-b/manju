@@ -59,7 +59,7 @@ def _shot_context(connection: sqlite3.Connection, shot_id: str):
 
 def _shot_dict(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, Any]:
     characters = connection.execute(
-        "SELECT character_id, outfit_id FROM shot_characters WHERE shot_id = ? ORDER BY character_id",
+        "SELECT character_id, outfit_id, look_id, primary_reference_id, position, emotion, action, state_json, continuity_overrides_json FROM shot_characters WHERE shot_id = ? ORDER BY position, character_id",
         (row["id"],),
     ).fetchall()
     versions = connection.execute(
@@ -89,8 +89,24 @@ def _shot_dict(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, An
         "reviewed": bool(row["reviewed"]),
         "qcScore": row["qc_score"],
         "cost": round(float(row["cost"] or 0), 2),
+        "stale": bool(row["stale"]) if "stale" in row.keys() else False,
+        "staleReason": row["stale_reason"] if "stale_reason" in row.keys() else "",
         "characterIds": [item["character_id"] for item in characters],
         "outfitId": next((item["outfit_id"] for item in characters if item["outfit_id"]), None),
+        "characterBindings": [
+            {
+                "characterId": item["character_id"],
+                "outfitId": item["outfit_id"],
+                "lookId": item["look_id"] or item["outfit_id"],
+                "primaryReferenceId": item["primary_reference_id"],
+                "position": item["position"],
+                "emotion": item["emotion"],
+                "action": item["action"],
+                "state": loads(item["state_json"], {}),
+                "continuityOverrides": loads(item["continuity_overrides_json"], {}),
+            }
+            for item in characters
+        ],
         "versions": [
             {
                 "id": item["id"],
@@ -114,6 +130,8 @@ def _asset_url(connection: sqlite3.Connection, asset_id: str | None) -> str | No
 
 
 def project_to_dict(project_id: str) -> dict[str, Any]:
+    from .character_assets import character_dict
+
     with session() as connection:
         project = _project_row(connection, project_id)
         bible = connection.execute("SELECT * FROM story_bibles WHERE project_id = ?", (project_id,)).fetchone()
@@ -179,11 +197,11 @@ def project_to_dict(project_id: str) -> dict[str, Any]:
             } if current_scene else None,
             "shots": [_shot_dict(connection, row) for row in shots],
             "assets": {
-                "characters": [{"id": item["id"], "name": item["name"], "meta": item["meta"], "description": item["appearance"], "image": item["image"], "status": item["status"], "age": item["age"], "gender": item["gender"], "role": item["role"], "personality": item["personality"], "prompt": item["prompt"]} for item in characters],
+                "characters": [character_dict(connection, item) for item in characters],
                 "locations": [{"id": item["id"], "name": item["name"], "meta": item["meta"], "description": item["description"], "image": item["image"], "status": item["status"]} for item in locations],
                 "props": [{"id": item["id"], "name": item["name"], "meta": item["meta"], "description": item["description"], "image": item["image"], "status": item["status"]} for item in props],
             },
-            "tasks": [{"id": item["id"], "shotId": item["shot_id"], "type": item["type"], "model": item["model"], "status": item["status"], "cost": round(float(item["actual_cost"] if item["actual_cost"] is not None else item["estimated_cost"]), 2), "createdAt": item["created_at"], "error": item["error_message"], "progress": item["progress"]} for item in tasks],
+            "tasks": [{"id": item["id"], "shotId": item["shot_id"], "targetType": item["target_type"], "targetId": item["target_id"], "type": item["type"], "model": item["model"], "status": item["status"], "cost": round(float(item["actual_cost"] if item["actual_cost"] is not None else item["estimated_cost"]), 2), "createdAt": item["created_at"], "error": item["error_message"], "progress": item["progress"]} for item in tasks],
         }
 
 
@@ -444,22 +462,34 @@ def generation_task(task_id: str) -> dict[str, Any]:
     row = task_row(task_id)
     if not row:
         raise KeyError(f"task {task_id} not found")
-    return {"id": row["id"], "shotId": row["shot_id"], "status": row["status"], "provider": row["provider"], "model": row["model"], "progress": row["progress"], "estimatedCost": row["estimated_cost"], "actualCost": row["actual_cost"], "retryCount": row["retry_count"], "error": row["error_message"], "createdAt": row["created_at"], "startedAt": row["started_at"], "completedAt": row["completed_at"]}
+    return {"id": row["id"], "shotId": row["shot_id"], "targetType": row["target_type"], "targetId": row["target_id"], "status": row["status"], "provider": row["provider"], "model": row["model"], "progress": row["progress"], "estimatedCost": row["estimated_cost"], "actualCost": row["actual_cost"], "retryCount": row["retry_count"], "error": row["error_message"], "createdAt": row["created_at"], "startedAt": row["started_at"], "completedAt": row["completed_at"], "parameters": loads(row["parameters_json"], {})}
 
 
-def create_generation_task(shot_id: str, prompt: str, provider: str, model: str, estimated_cost: float = 0.73) -> tuple[str, str]:
+def create_generation_task(shot_id: str, prompt: str, provider: str, model: str, estimated_cost: float = 0.73, parameters: dict[str, Any] | None = None) -> tuple[str, str]:
     with session() as connection:
         context = _shot_context(connection, shot_id)
         if not context:
             raise KeyError(f"shot {shot_id} not found")
         task_id = new_id("T-")
         connection.execute(
-            """INSERT INTO generation_tasks(id, project_id, shot_id, provider, model, status, prompt, estimated_cost)
-            VALUES (?, ?, ?, ?, ?, 'Queued', ?, ?)""",
-            (task_id, context["project_id"], shot_id, provider, model, prompt, estimated_cost),
+            """INSERT INTO generation_tasks(id, project_id, shot_id, target_type, target_id, provider, model, status, prompt, parameters_json, estimated_cost)
+            VALUES (?, ?, ?, 'shot', ?, ?, ?, 'Queued', ?, ?, ?)""",
+            (task_id, context["project_id"], shot_id, shot_id, provider, model, prompt, dumps(parameters or {}), estimated_cost),
         )
         connection.execute("UPDATE shots SET status = '生成中', prompt = ?, updated_at = ? WHERE id = ?", (prompt, now_text(), shot_id))
         return context["project_id"], task_id
+
+
+def create_target_generation_task(project_id: str, target_type: str, target_id: str, prompt: str, provider: str, model: str, estimated_cost: float = 0.18, parameters: dict[str, Any] | None = None, task_type: str = "图片") -> str:
+    with session() as connection:
+        _project_row(connection, project_id)
+        task_id = new_id("T-")
+        connection.execute(
+            """INSERT INTO generation_tasks(id, project_id, shot_id, target_type, target_id, type, provider, model, status, prompt, parameters_json, estimated_cost)
+            VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 'Queued', ?, ?, ?)""",
+            (task_id, project_id, target_type, target_id, task_type, provider, model, prompt, dumps(parameters or {}), estimated_cost),
+        )
+        return task_id
 
 
 def claim_next_task() -> dict[str, Any] | None:
@@ -486,6 +516,16 @@ def complete_generation_task(task_id: str, result: dict[str, Any]) -> str:
         task = connection.execute("SELECT * FROM generation_tasks WHERE id = ?", (task_id,)).fetchone()
         if not task:
             raise KeyError(f"task {task_id} not found")
+        if task["target_type"] == "character_reference":
+            output_url = result.get("output_url") or result.get("image_url") or result.get("url") or "/assets/shot-hero.png"
+            media_asset_id = new_id("MEDIA-")
+            connection.execute("INSERT INTO media_assets(id, project_id, type, path_or_url, source, provider, model, prompt, metadata_json) VALUES (?, ?, 'character_reference', ?, 'provider', ?, ?, ?, ?)", (media_asset_id, task["project_id"], output_url, task["provider"], task["model"], task["prompt"], dumps({"targetType": task["target_type"], "targetId": task["target_id"]})))
+            connection.execute("UPDATE character_references SET media_asset_id = ?, lifecycle_status = 'generated', quality_score = ?, updated_at = ? WHERE id = ?", (media_asset_id, result.get("qc_score", 91), now_text(), task["target_id"]))
+            actual_cost = round(float(result.get("cost") or task["estimated_cost"] or 0), 2)
+            connection.execute("UPDATE generation_tasks SET status = 'Success', progress = 100, actual_cost = ?, completed_at = ?, updated_at = ? WHERE id = ?", (actual_cost, now_text(), now_text(), task_id))
+            connection.execute("UPDATE projects SET spent = spent + ?, updated_at = ? WHERE id = ?", (actual_cost, now_text(), task["project_id"]))
+            connection.execute("INSERT INTO cost_records(id, project_id, task_id, provider, model, category, estimated_cost, actual_cost, status) VALUES (?, ?, ?, ?, ?, 'character_reference', ?, ?, 'actual')", (new_id("COST-"), task["project_id"], task_id, task["provider"], task["model"], task["estimated_cost"], actual_cost))
+            return task["project_id"]
         shot = connection.execute("SELECT * FROM shots WHERE id = ?", (task["shot_id"],)).fetchone()
         if not shot:
             raise KeyError(f"shot {task['shot_id']} not found")
@@ -518,8 +558,9 @@ def fail_generation_task(task_id: str, error_message: str) -> str:
         if not task:
             raise KeyError(f"task {task_id} not found")
         connection.execute("UPDATE generation_tasks SET status = 'Failed', progress = 0, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?", (error_message, now_text(), now_text(), task_id))
-        connection.execute("UPDATE shots SET status = '待生成', updated_at = ? WHERE id = ? AND status = '生成中'", (now_text(), task["shot_id"]))
-        connection.execute("INSERT INTO cost_records(id, project_id, shot_id, task_id, provider, model, category, estimated_cost, actual_cost, status) VALUES (?, ?, ?, ?, ?, ?, 'failed', ?, 0, 'failed')", (new_id("COST-"), task["project_id"], task["shot_id"], task_id, task["provider"], task["model"], task["estimated_cost"]))
+        if task["shot_id"]:
+            connection.execute("UPDATE shots SET status = '待生成', updated_at = ? WHERE id = ? AND status = '生成中'", (now_text(), task["shot_id"]))
+        connection.execute("INSERT INTO cost_records(id, project_id, shot_id, task_id, provider, model, category, estimated_cost, actual_cost, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'failed')", (new_id("COST-"), task["project_id"], task["shot_id"], task_id, task["provider"], task["model"], "failed" if task["target_type"] == "shot" else "character_reference", task["estimated_cost"]))
         return task["project_id"]
 
 
@@ -529,7 +570,8 @@ def cancel_generation_task(task_id: str) -> str:
         if not task:
             raise KeyError(f"task {task_id} not found")
         connection.execute("UPDATE generation_tasks SET status = 'Cancelled', completed_at = ?, updated_at = ? WHERE id = ? AND status IN ('Queued', 'Running', 'Retrying')", (now_text(), now_text(), task_id))
-        connection.execute("UPDATE shots SET status = '待生成', updated_at = ? WHERE id = ? AND status = '生成中'", (now_text(), task["shot_id"]))
+        if task["shot_id"]:
+            connection.execute("UPDATE shots SET status = '待生成', updated_at = ? WHERE id = ? AND status = '生成中'", (now_text(), task["shot_id"]))
         return task["project_id"]
 
 
@@ -541,7 +583,8 @@ def retry_generation_task(task_id: str) -> tuple[str, str]:
         if int(task["retry_count"]) >= int(task["max_retries"]):
             raise ValueError("已达到最大重试次数")
         connection.execute("UPDATE generation_tasks SET status = 'Retrying', retry_count = retry_count + 1, error_message = NULL, queued_at = ?, updated_at = ? WHERE id = ?", (now_text(), now_text(), task_id))
-        connection.execute("UPDATE shots SET status = '生成中', updated_at = ? WHERE id = ?", (now_text(), task["shot_id"]))
+        if task["shot_id"]:
+            connection.execute("UPDATE shots SET status = '生成中', updated_at = ? WHERE id = ?", (now_text(), task["shot_id"]))
         return task["project_id"], task_id
 
 

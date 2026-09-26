@@ -13,11 +13,21 @@ import {
   generateRemoteBreakdown,
   generateRemoteMatrix,
   generateRemoteAsset,
+  generateRemoteCandidates,
+  generateRemoteMasterSheet,
   generateRemoteSceneScript,
   generateRemoteShot,
   getRemoteHealth,
   getRemoteProject,
   getRemoteScenes,
+  approveRemoteReference,
+  rejectRemoteReference,
+  extractRemoteAnchors,
+  createRemoteCharacterLook,
+  lockRemoteCharacter,
+  unlockRemoteCharacter,
+  patchRemoteCharacter,
+  setRemoteCanonical,
   patchRemoteAsset,
   patchRemoteEpisode,
   patchRemoteProject,
@@ -216,6 +226,79 @@ export function App() {
               : [...current.assets[assetType], asset],
           },
         }));
+        return response;
+      });
+    },
+    extractCharacterAnchors: (characterId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return extractRemoteAnchors(characterId).then(async (response) => {
+        setProject(await getRemoteProject());
+        notify("Identity Anchors 已提取");
+        return response;
+      });
+    },
+    generateCharacterCandidates: (characterId, payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteCandidates(characterId, payload).then((response) => {
+        getRemoteProject().then(setProject);
+        (response.taskIds || []).forEach((taskId) => pollRemoteGeneration(taskId, characterId));
+        notify(`已创建 ${response.count} 张候选人物图`);
+        return response;
+      });
+    },
+    generateCharacterMasterSheet: (characterId, payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteMasterSheet(characterId, payload).then((response) => {
+        getRemoteProject().then(setProject);
+        pollRemoteGeneration(response.taskId, characterId);
+        notify("Master Reference Sheet 已进入生成队列");
+        return response;
+      });
+    },
+    setCharacterCanonical: (characterId, referenceId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return setRemoteCanonical(characterId, referenceId).then((character) => {
+        setProject((current) => ({ ...current, assets: { ...current.assets, characters: current.assets.characters.map((item) => item.id === character.id ? character : item) } }));
+        notify("已选择 Canonical Reference");
+        return character;
+      });
+    },
+    reviewCharacterReference: (referenceId, approved) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return (approved ? approveRemoteReference(referenceId) : rejectRemoteReference(referenceId)).then(async (response) => {
+        setProject(await getRemoteProject());
+        notify(approved ? "参考图已审核通过" : "参考图已拒绝");
+        return response;
+      });
+    },
+    lockCharacter: (characterId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return lockRemoteCharacter(characterId).then(async (character) => {
+        setProject(await getRemoteProject());
+        notify("Identity 已锁定");
+        return character;
+      });
+    },
+    unlockCharacter: (characterId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return unlockRemoteCharacter(characterId).then(async (character) => {
+        setProject(await getRemoteProject());
+        notify("Identity 已解锁");
+        return character;
+      });
+    },
+    updateCharacter: (characterId, patch) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteCharacter(characterId, patch).then(async (character) => {
+        setProject(await getRemoteProject());
+        return character;
+      });
+    },
+    createCharacterLook: (characterId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteCharacterLook(characterId, payload).then(async (response) => {
+        setProject(await getRemoteProject());
+        notify("已添加角色造型");
         return response;
       });
     },

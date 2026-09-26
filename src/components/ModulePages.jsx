@@ -329,13 +329,44 @@ function AssetGenerationPage({ project, actions }) {
   </div>;
 }
 
-function AssetsPage({ project, onAddAsset, onUpdateAsset }) {
+function CharacterEnginePanel({ character, actions }) {
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  if (!character) return <div className="character-engine-empty">选择一个角色开始建立 Identity。</div>;
+  const run = async (operation, success) => {
+    setBusy(true);
+    setNotice("");
+    try {
+      await operation();
+      setNotice(success);
+    } catch (error) {
+      setNotice(error?.message || "操作失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const anchors = character.identityAnchors || {};
+  const references = character.references || [];
+  const looks = character.looks || [];
+  return <section className="character-engine-panel">
+    <div className="character-engine-head"><div><span>{character.id} · Character Asset Engine</span><h2>{character.name}</h2><p>{character.description || "还没有角色描述"}</p></div><em className={character.identityLocked ? "locked" : "draft"}>{character.identityLocked ? "Identity Locked" : "Draft"}</em></div>
+    <div className="character-engine-actions"><button type="button" onClick={() => run(() => actions.extractCharacterAnchors(character.id), "Identity Anchors 已更新")} disabled={busy}><Sparkle size={15} />提取 Anchors</button><button type="button" onClick={() => run(() => actions.generateCharacterCandidates(character.id, { count: 4 }), "4 张候选图已进入任务队列")} disabled={busy}><Images size={15} />生成 4 候选</button><button type="button" onClick={() => run(() => actions.generateCharacterMasterSheet(character.id, {}), "Master Sheet 已进入任务队列")} disabled={busy || !character.canonicalReferenceId}>生成 Master Sheet</button>{character.identityLocked ? <button type="button" onClick={() => run(() => actions.unlockCharacter(character.id), "Identity 已解锁")} disabled={busy}>解锁</button> : <button className="primary-action" type="button" onClick={() => run(() => actions.lockCharacter(character.id), "Identity 已锁定")} disabled={busy || !character.canonicalReferenceId}>锁定 Identity</button>}</div>
+    {notice && <div className="character-engine-notice">{notice}</div>}
+    <div className="character-engine-stats"><div><span>Look</span><strong>{character.lookCount || looks.length}</strong></div><div><span>Approved Ref</span><strong>{character.approvedReferenceCount || 0}</strong></div><div><span>Used in shots</span><strong>{character.usageCount || 0}</strong></div><div><span>Canonical</span><strong>{character.canonicalReferenceId ? "已选" : "待选"}</strong></div></div>
+    <div className="character-engine-section"><div className="section-heading"><div><h3>Identity Anchors</h3><p>稳定身份，不随服装和剧情状态改变。</p></div></div><div className="anchor-chips">{[anchors.hair, anchors.faceShape, anchors.bodySilhouette, ...(anchors.uniqueMarks || [])].filter(Boolean).map((item, index) => <span key={`${item}-${index}`}>{item}</span>)}</div>{!Object.keys(anchors).length && <small className="character-engine-muted">先提取 Anchors，再让用户确认脸型、独特标记和四视图细节。</small>}</div>
+    <div className="character-engine-section"><div className="section-heading"><div><h3>Looks <span>{looks.length}</span></h3><p>服装、妆容、伤痕和天气等可变状态。</p></div><button type="button" onClick={() => run(() => actions.createCharacterLook(character.id, { name: `新造型 ${looks.length + 1}`, description: "补充该造型与身份的差异。", differences: { wardrobe: "待填写" } }), "已添加新造型")} disabled={busy}><Plus size={14} />添加</button></div><div className="look-list">{looks.map((look) => <div key={look.id}><strong>{look.name}</strong><span>{look.description || "未填写差异"}</span><em>{look.status}</em></div>)}</div></div>
+    <div className="character-engine-section"><div className="section-heading"><div><h3>References <span>{references.length}</span></h3><p>只有 approved 参考图会进入分镜生成请求。</p></div></div><div className="reference-grid">{references.map((reference) => <article className={reference.id === character.canonicalReferenceId ? "canonical" : ""} key={reference.id}><img src={reference.image || "/assets/shot-hero.png"} alt="" /><div><strong>{reference.referenceType}</strong><span>{reference.lifecycleStatus}</span></div>{reference.lifecycleStatus === "generated" && <div className="reference-actions"><button type="button" onClick={() => run(() => actions.reviewCharacterReference(reference.id, true), "参考图已审核")}>通过</button><button type="button" onClick={() => run(() => actions.reviewCharacterReference(reference.id, false), "参考图已拒绝")}>拒绝</button><button type="button" onClick={() => run(() => actions.setCharacterCanonical(character.id, reference.id), "已设为 Canonical")}>设为 Canonical</button></div>}{reference.lifecycleStatus === "approved" && reference.id !== character.canonicalReferenceId && <button type="button" className="reference-canonical-button" onClick={() => run(() => actions.setCharacterCanonical(character.id, reference.id), "已设为 Canonical")}>设为 Canonical</button>}{reference.id === character.canonicalReferenceId && <em className="canonical-label">Canonical</em>}</article>)}{!references.length && <small className="character-engine-muted">候选图生成后会在这里出现。</small>}</div></div>
+  </section>;
+}
+
+function AssetsPage({ project, onAddAsset, onUpdateAsset, actions }) {
   const [tab, setTab] = useState("characters");
+  const [selectedCharacterId, setSelectedCharacterId] = useState(project.assets.characters[0]?.id);
   const config = { characters: ["角色", "新增角色"], locations: ["场景", "新增场景"], props: ["道具", "新增道具"] };
   const items = project.assets[tab];
-  return <div className="module-page"><PageHeader eyebrow="Asset System" title="项目资产库" description="角色、场景和道具在所有镜头中保持统一引用。" action={<button className="primary-action" type="button" onClick={() => onAddAsset(tab)}><Plus size={18} />{config[tab][1]}</button>} />
+  return <div className="module-page"><PageHeader eyebrow="Asset System" title="项目资产库" description={tab === "characters" ? "先确认 Identity，再管理多个 Look；已审核 Reference 才能进入生产。" : "角色、场景和道具在所有镜头中保持统一引用。"} action={<button className="primary-action" type="button" onClick={() => onAddAsset(tab)}><Plus size={18} />{config[tab][1]}</button>} />
     <div className="page-tabs">{Object.entries(config).map(([key, [label]]) => <button className={tab === key ? "is-active" : ""} key={key} onClick={() => setTab(key)} type="button">{label}<span>{project.assets[key].length}</span></button>)}</div>
-    <div className="asset-grid">{items.map((item) => <article className="asset-card" key={item.id}><img src={item.image} alt="" /><div><span>{item.id}</span><input value={item.name} onChange={(event) => onUpdateAsset(tab, item.id, { name: event.target.value })} /><small>{item.meta}</small><textarea value={item.description} onChange={(event) => onUpdateAsset(tab, item.id, { description: event.target.value })} /><em>{item.status}</em></div></article>)}</div>
+    {tab === "characters" ? <div className="character-engine-layout"><div className="character-list">{items.map((item) => <button className={selectedCharacterId === item.id ? "is-active" : ""} key={item.id} type="button" onClick={() => setSelectedCharacterId(item.id)}><img src={item.image || "/assets/shot-hero.png"} alt="" /><span><strong>{item.name}</strong><small>{item.id} · {item.role || item.meta || "角色"}</small><em>{item.identityLocked ? "Locked" : "Draft"}</em></span><ArrowRight size={16} /></button>)}</div><CharacterEnginePanel character={items.find((item) => item.id === selectedCharacterId) || items[0]} actions={actions} /></div> : <div className="asset-grid">{items.map((item) => <article className="asset-card" key={item.id}><img src={item.image} alt="" /><div><span>{item.id}</span><input value={item.name} onChange={(event) => onUpdateAsset(tab, item.id, { name: event.target.value })} /><small>{item.meta}</small><textarea value={item.description} onChange={(event) => onUpdateAsset(tab, item.id, { description: event.target.value })} /><em>{item.status}</em></div></article>)}</div>}
   </div>;
 }
 
@@ -378,7 +409,7 @@ export function ModulePage({ activeNav, project, stats, actions }) {
   if (activeNav === "概览") return <OverviewPage project={project} stats={stats} onNavigate={actions.navigate} />;
   if (activeNav === "故事") return <ScriptPage project={project} actions={actions} />;
   if (activeNav === "剧集") return <EpisodesPage project={project} onOpenEpisode={actions.openEpisode} />;
-  if (activeNav === "素材库") return <AssetsPage project={project} onAddAsset={actions.addAsset} onUpdateAsset={actions.updateAsset} />;
+  if (activeNav === "素材库") return <AssetsPage project={project} onAddAsset={actions.addAsset} onUpdateAsset={actions.updateAsset} actions={actions} />;
   if (activeNav === "生图") return <AssetGenerationPage project={project} actions={actions} />;
   if (activeNav === "生成") return <GenerationPage project={project} onRetry={actions.retryTask} onCancel={actions.cancelTask} onNavigate={actions.navigate} />;
   if (activeNav === "时间线") return <TimelinePage project={project} />;
