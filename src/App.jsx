@@ -55,7 +55,7 @@ function nextAssetId(items, prefix) {
 
 export function App() {
   const [project, setProject] = useState(() => loadProject());
-  const [activeNav, setActiveNav] = useState("概览");
+  const [activeNav, setActiveNav] = useState("Agent");
   const [selectedShotId, setSelectedShotId] = useState(() => loadProject().shots.find((shot) => shot.episodeId === loadProject().currentEpisodeId)?.id || null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [toast, setToast] = useState(null);

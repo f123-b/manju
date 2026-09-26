@@ -11,11 +11,13 @@ import {
   Images,
   MagnifyingGlass,
   Note,
+  Robot,
   Sparkle,
   SquaresFour,
 } from "@phosphor-icons/react";
 
 const navItems = [
+  { label: "Agent", icon: Robot },
   { label: "概览", icon: House },
   { label: "故事", icon: Note },
   { label: "剧集", icon: FilmStrip },
@@ -30,7 +32,7 @@ const navItems = [
 export function Sidebar({ activeNav, onNavigate }) {
   return (
     <aside className="sidebar">
-      <button className="brand-lockup" type="button" aria-label="返回项目概览" onClick={() => onNavigate("概览")}>
+      <button className="brand-lockup" type="button" aria-label="打开 Agent" onClick={() => onNavigate("Agent")}>
         <span className="brand-mark" aria-hidden="true"><FilmSlate size={21} weight="fill" /></span>
         <span><span className="brand-name">Short Drama OS</span><span className="brand-tagline">用 AI 讲好每一个故事</span></span>
       </button>

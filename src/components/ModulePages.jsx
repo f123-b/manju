@@ -9,7 +9,10 @@ import {
   Images,
   MagnifyingGlass,
   Plus,
+  Play,
+  Robot,
   Sparkle,
+  Stop,
   Trash,
   Warning,
   X,
@@ -17,6 +20,108 @@ import {
 
 function PageHeader({ eyebrow, title, description, action }) {
   return <div className="module-header"><div><span>{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{action}</div>;
+}
+
+const agentPlan = [
+  ["context", "读取故事上下文", "故事圣经、角色规则与当前剧集状态"],
+  ["matrix", "推进剧集矩阵", "锁定开场钩子、核心事件和结尾问题"],
+  ["scene", "准备可拍场景", "复用已有场景，没有就自动创建"],
+  ["script", "生成场景剧本", "把场景目的写成动作与对白节拍"],
+  ["breakdown", "拆解生产镜头", "生成景别、时长和下一步生产任务"],
+];
+
+function AgentPage({ project, stats, actions }) {
+  const [episodeId, setEpisodeId] = useState(project.currentEpisodeId);
+  const [goal, setGoal] = useState(() => `把 ${project.currentEpisodeId} 做成可拍分镜，保持人物关系和故事规则连续`);
+  const [running, setRunning] = useState(false);
+  const [stepState, setStepState] = useState(() => agentPlan.map(([id]) => ({ id, status: "pending" })));
+  const [logs, setLogs] = useState(["Agent 已就绪，等待你的制作目标。"]);
+  const [result, setResult] = useState("");
+
+  useEffect(() => {
+    if (project.currentEpisodeId && project.currentEpisodeId !== episodeId && !running) {
+      setEpisodeId(project.currentEpisodeId);
+    }
+  }, [project.currentEpisodeId, running]);
+
+  const episode = project.episodes.find((item) => item.id === episodeId) || project.episodes[0];
+  const currentShots = project.shots.filter((shot) => shot.episodeId === episodeId);
+  const addLog = (message) => setLogs((current) => [...current.slice(-7), message]);
+  const updateStep = (id, status) => setStepState((current) => current.map((step) => step.id === id ? { ...step, status } : step));
+
+  const runAgent = async () => {
+    if (running || actions.backendStatus !== "online") return;
+    setRunning(true);
+    setResult("");
+    setStepState(agentPlan.map(([id]) => ({ id, status: "pending" })));
+    setLogs([`收到目标：${goal.trim() || `推进 ${episodeId} 的剧本生产`}`]);
+    let activeStep = "context";
+    try {
+      updateStep(activeStep, "running");
+      addLog(`读取 ${episodeId} 的故事规则与当前生产状态`);
+      await Promise.resolve();
+      updateStep(activeStep, "done");
+
+      activeStep = "matrix";
+      updateStep(activeStep, "running");
+      addLog("正在整理本集矩阵，确保先有节奏再进入镜头");
+      await actions.generateMatrix(episodeId, {});
+      updateStep(activeStep, "done");
+
+      activeStep = "scene";
+      updateStep(activeStep, "running");
+      let scenes = await actions.loadScenes(episodeId);
+      let scene = scenes[0];
+      if (!scene) {
+        addLog("当前剧集没有场景，Agent 自动创建第一个可拍场景");
+        scene = await actions.createScene(episodeId, { title: "Agent 场景", purpose: "推进本集核心冲突并留下下一集问题", summary: goal.trim(), timeOfDay: "夜晚" });
+      } else {
+        addLog(`复用场景 ${scene.id}：${scene.title}`);
+      }
+      updateStep(activeStep, "done");
+
+      activeStep = "script";
+      updateStep(activeStep, "running");
+      addLog(`正在为 ${scene.id} 生成动作与对白节拍`);
+      await actions.generateSceneScript(scene.id, {});
+      updateStep(activeStep, "done");
+
+      activeStep = "breakdown";
+      updateStep(activeStep, "running");
+      addLog("正在把场景节拍拆成可生成镜头");
+      const breakdown = await actions.generateBreakdown(scene.id, {});
+      updateStep(activeStep, "done");
+      setResult(`已完成 ${episodeId}：${scene.id} 已准备 ${breakdown.length} 个镜头，下一步可进入分镜工作台执行生成。`);
+      addLog("Agent 已完成本轮任务，等待你的审核");
+    } catch (error) {
+      updateStep(activeStep, "failed");
+      addLog(`执行暂停：${error?.message || "接口返回异常"}`);
+      setResult("本轮执行已暂停，请处理错误后重新运行。");
+    } finally {
+      setRunning(false);
+    }
+  };
+
+  return <div className="module-page agent-page">
+    <PageHeader eyebrow="Agent Control Center" title="剧本 Agent" description="用一句话下达制作目标，Agent 会读取上下文、调用 API，并把结果推进到可审核的镜头。" action={<span className={`agent-runtime ${actions.backendStatus}`}>{actions.backendStatus === "online" ? "FastAPI 已连接" : "等待 API"}</span>} />
+    <div className="agent-layout">
+      <section className="module-section agent-command-card">
+        <div className="section-heading"><div><h2>告诉 Agent 你要什么</h2><p>目标越接近结果，Agent 越少打断你。</p></div><Robot size={24} weight="duotone" /></div>
+        <label className="agent-episode-field">工作剧集<select value={episodeId} onChange={(event) => { setEpisodeId(event.target.value); actions.updateProject({ currentEpisodeId: event.target.value }); }}><option value="">选择剧集</option>{project.episodes.map((item) => <option key={item.id} value={item.id}>{item.id}　{item.title}</option>)}</select></label>
+        <label className="agent-goal-field"><span>制作目标</span><textarea value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="例如：把 EP08 写成一场有反转的天台对峙，并拆成可生成镜头" /></label>
+        <div className="agent-suggestions"><span>快速开始</span><button type="button" onClick={() => setGoal(`完成 ${episodeId} 的剧本到分镜流程`)}>完成本集到分镜</button><button type="button" onClick={() => setGoal(`为 ${episodeId} 补齐冲突升级和结尾钩子`)}>补齐本集节奏</button><button type="button" onClick={() => setGoal(`检查 ${episodeId} 的角色规则并修正镜头连续性`)}>检查连续性</button></div>
+        <div className="agent-command-footer"><span>{actions.backendStatus === "online" ? "Agent 会在写入前继承故事圣经和不可违反规则。" : "FastAPI 未连接，暂时不能执行 Agent 任务。"}</span><button className="primary-action" type="button" onClick={runAgent} disabled={running || actions.backendStatus !== "online"}>{running ? <><Stop size={16} />停止中…</> : <><Play size={16} weight="fill" />开始执行</>}</button></div>
+      </section>
+      <section className="module-section agent-plan-card">
+        <div className="section-heading"><div><h2>Agent 执行计划</h2><p>每一步都有结果，随时可以回到工作台人工接管。</p></div><span className="agent-plan-count">{stepState.filter((step) => step.status === "done").length} / {stepState.length}</span></div>
+        <div className="agent-plan-list">{agentPlan.map(([id, title, detail], index) => { const state = stepState.find((step) => step.id === id)?.status || "pending"; return <div className={`agent-plan-step ${state}`} key={id}><i>{state === "done" ? <Check size={14} weight="bold" /> : state === "running" ? <Sparkle size={14} /> : state === "failed" ? "!" : index + 1}</i><div><strong>{title}</strong><small>{detail}</small></div><em>{state === "done" ? "完成" : state === "running" ? "执行中" : state === "failed" ? "已暂停" : "等待"}</em></div>; })}</div>
+      </section>
+    </div>
+    <div className="agent-lower-grid">
+      <section className="module-section agent-log-card"><div className="section-heading"><div><h2>执行日志</h2><p>Agent 的每个动作都会留下可追踪记录。</p></div><span className={`agent-live-dot ${running ? "is-live" : ""}`}>{running ? "LIVE" : "IDLE"}</span></div><div className="agent-log-list">{logs.map((log, index) => <div key={`${log}-${index}`}><span>{String(index + 1).padStart(2, "0")}</span><p>{log}</p></div>)}</div>{result && <div className="agent-result"><Check size={16} weight="bold" /><span>{result}</span></div>}</section>
+      <section className="module-section agent-memory-card"><div className="section-heading"><div><h2>Agent 记忆</h2><p>本轮执行会继承这些项目上下文。</p></div></div><div className="agent-memory-summary"><div><span>当前剧集</span><strong>{episode?.id} · {episode?.title}</strong><small>{currentShots.length} 个已有镜头</small></div><div><span>故事规则</span><strong>{project.storyBible.rules.length} 条不可违反规则</strong><small>自动注入生成请求</small></div><div><span>工作模式</span><strong>先计划，再执行</strong><small>关键节点保留人工接管</small></div></div><div className="agent-rule-preview">{project.storyBible.rules.slice(0, 3).map((rule, index) => <p key={`${rule}-${index}`}><i>{index + 1}</i>{rule}</p>)}</div></section>
+    </div>
+  </div>;
 }
 
 function OverviewPage({ project, stats, onNavigate }) {
@@ -205,6 +310,7 @@ function SettingsPage({ project, onUpdateProject, backendStatus, providerInfo })
 }
 
 export function ModulePage({ activeNav, project, stats, actions }) {
+  if (activeNav === "Agent") return <AgentPage project={project} stats={stats} actions={actions} />;
   if (activeNav === "概览") return <OverviewPage project={project} stats={stats} onNavigate={actions.navigate} />;
   if (activeNav === "故事") return <ScriptPage project={project} actions={actions} />;
   if (activeNav === "剧集") return <EpisodesPage project={project} onOpenEpisode={actions.openEpisode} />;
