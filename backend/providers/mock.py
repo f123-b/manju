@@ -16,7 +16,10 @@ class MockProvider(BaseProvider):
 
     async def submit(self, payload: dict[str, Any]) -> dict[str, Any]:
         await asyncio.sleep(float(os.environ.get("SHORT_DRAMA_DEMO_DELAY", "2.2")))
-        output = "/assets/shot-wide.png" if self.kind in {"image", "video"} else None
+        if self.kind == "image":
+            output = "/assets/shot-hero.png" if payload.get("asset_type") == "characters" else "/assets/shot-wide.png"
+        else:
+            output = "/assets/shot-wide.png" if self.kind == "video" else None
         return {"status": "Success", "provider_task_id": f"mock-{payload.get('task_id', 'task')}", "output_url": output, "cost": await self.estimate_cost(payload)}
 
     async def status(self, provider_task_id: str, status_url: str | None = None) -> dict[str, Any]:

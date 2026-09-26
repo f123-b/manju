@@ -22,6 +22,7 @@ const navItems = [
   { label: "故事", icon: Note },
   { label: "剧集", icon: FilmStrip },
   { label: "素材库", icon: Images },
+  { label: "生图", icon: Sparkle },
   { label: "分镜", icon: SquaresFour },
   { label: "生成", icon: Sparkle },
   { label: "时间线", icon: Clock },

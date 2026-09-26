@@ -265,6 +265,70 @@ function EpisodesPage({ project, onOpenEpisode }) {
   </div>;
 }
 
+function AssetGenerationPage({ project, actions }) {
+  const [assetType, setAssetType] = useState("characters");
+  const [name, setName] = useState("林泽");
+  const [description, setDescription] = useState("28岁，黑发，克制冷静，创业者，眼神坚定但带着压抑的情绪。");
+  const [style, setStyle] = useState("电影感写实");
+  const [negativePrompt, setNegativePrompt] = useState("避免卡通感、过度磨皮、畸形手指、文字水印");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+  const [generated, setGenerated] = useState(null);
+
+  const config = {
+    characters: { label: "人物图", meta: "角色参考", placeholder: "年龄、外貌、气质、身份、服装…", defaultName: "林泽", defaultDescription: "28岁，黑发，克制冷静，创业者，眼神坚定但带着压抑的情绪。" },
+    locations: { label: "场景图", meta: "场景参考", placeholder: "时间、空间、光线、材质、氛围…", defaultName: "城市天台", defaultDescription: "夜晚城市天台，江面反光，远处高楼灯光，冷蓝色电影感，适合两个人对峙。" },
+  };
+  const currentConfig = config[assetType];
+  const assets = project.assets[assetType] || [];
+
+  useEffect(() => {
+    setName(currentConfig.defaultName);
+    setDescription(currentConfig.defaultDescription);
+    setGenerated(null);
+    setNotice("");
+  }, [assetType]);
+
+  const generate = async () => {
+    if (busy) return;
+    setBusy(true);
+    setNotice("");
+    try {
+      const prompt = `${name}，${description}。${style}，短剧制作参考图，构图清晰，主体明确。负面约束：${negativePrompt}`;
+      const response = await actions.generateAsset(assetType, {
+        name,
+        description,
+        prompt,
+        style,
+        negativePrompt,
+        meta: currentConfig.meta,
+        role: assetType === "characters" ? "主要角色" : undefined,
+        status: "已生成",
+      });
+      setGenerated(response.asset);
+      setNotice(`已生成 ${response.asset.id}，预计消耗 ¥${Number(response.cost || 0.18).toFixed(2)}`);
+    } catch (error) {
+      setNotice(error?.message || "生成失败，请检查 FastAPI 连接");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return <div className="module-page asset-generator-page">
+    <PageHeader eyebrow="Asset Generator" title="人物与场景生图" description="先建立可复用的视觉资产，后续 Agent 和镜头生成会统一引用它们。" action={<span className={`agent-runtime ${actions.backendStatus}`}>{actions.backendStatus === "online" ? "Image API 已连接" : "等待 API"}</span>} />
+    <div className="asset-generator-layout">
+      <section className="module-section asset-generator-form">
+        <div className="section-heading"><div><h2>生成设置</h2><p>把文字描述变成项目资产。</p></div><Sparkle size={23} weight="duotone" /></div>
+        <div className="asset-type-switch"><button className={assetType === "characters" ? "is-active" : ""} type="button" onClick={() => setAssetType("characters")}><span className="asset-type-icon character"><Images size={18} /></span><span><strong>人物图</strong><small>统一角色外观</small></span></button><button className={assetType === "locations" ? "is-active" : ""} type="button" onClick={() => setAssetType("locations")}><span className="asset-type-icon location"><FilmStrip size={18} /></span><span><strong>场景图</strong><small>建立空间与氛围</small></span></button></div>
+        <div className="asset-generator-fields"><label>资产名称<input value={name} onChange={(event) => setName(event.target.value)} placeholder={currentConfig.defaultName} /></label><label>描述<span className="field-hint">{currentConfig.placeholder}</span><textarea value={description} onChange={(event) => setDescription(event.target.value)} /></label><label>视觉风格<select value={style} onChange={(event) => setStyle(event.target.value)}><option>电影感写实</option><option>短剧清晰人物</option><option>低饱和都市</option><option>暖调生活感</option></select></label><label>负面约束<textarea className="compact" value={negativePrompt} onChange={(event) => setNegativePrompt(event.target.value)} /></label></div>
+        <div className="asset-generator-footer"><span>{actions.backendStatus === "online" ? "生成结果会自动保存到素材库。" : "FastAPI 未连接，暂时不能生成。"}</span><button className="primary-action" type="button" onClick={generate} disabled={busy || actions.backendStatus !== "online"}><Sparkle size={16} />{busy ? "生成中…" : `生成${currentConfig.label}`}</button></div>
+      </section>
+      <section className="module-section asset-generator-preview"><div className="section-heading"><div><h2>{generated ? generated.name : "生成预览"}</h2><p>{generated ? "已写入项目资产，可在素材库继续编辑。" : "生成后的参考图会显示在这里。"}</p></div>{generated && <span className="asset-generated-pill">已生成</span>}</div>{generated?.image ? <div className="asset-generated-image"><img src={generated.image} alt={generated.name} /></div> : <div className="asset-preview-empty"><Images size={30} /><strong>等待生成结果</strong><span>建议先生成一版，再根据连续性补充描述。</span></div>}{notice && <div className={`asset-generator-notice ${notice.includes("失败") || notice.includes("错误") ? "error" : ""}`}>{notice}</div>}{generated && <div className="asset-generated-meta"><div><span>资产编号</span><strong>{generated.id}</strong></div><div><span>类型</span><strong>{currentConfig.meta}</strong></div><div><span>状态</span><strong>{generated.status}</strong></div></div>}</section>
+    </div>
+    <section className="module-section asset-recent-section"><div className="section-heading"><div><h2>已有{currentConfig.label}</h2><p>生成后会自动加入这里，并可以被分镜和 Agent 复用。</p></div><button type="button" onClick={() => actions.navigate("素材库")}>打开素材库 <ArrowRight size={15} /></button></div><div className="asset-recent-grid">{assets.length ? assets.slice(-6).reverse().map((asset) => <article key={asset.id}><img src={asset.image} alt={asset.name} /><div><span>{asset.id}</span><strong>{asset.name}</strong><small>{asset.meta || currentConfig.meta}</small></div></article>) : <div className="asset-preview-empty small"><Images size={21} /><span>还没有资产</span></div>}</div></section>
+  </div>;
+}
+
 function AssetsPage({ project, onAddAsset, onUpdateAsset }) {
   const [tab, setTab] = useState("characters");
   const config = { characters: ["角色", "新增角色"], locations: ["场景", "新增场景"], props: ["道具", "新增道具"] };
@@ -315,6 +379,7 @@ export function ModulePage({ activeNav, project, stats, actions }) {
   if (activeNav === "故事") return <ScriptPage project={project} actions={actions} />;
   if (activeNav === "剧集") return <EpisodesPage project={project} onOpenEpisode={actions.openEpisode} />;
   if (activeNav === "素材库") return <AssetsPage project={project} onAddAsset={actions.addAsset} onUpdateAsset={actions.updateAsset} />;
+  if (activeNav === "生图") return <AssetGenerationPage project={project} actions={actions} />;
   if (activeNav === "生成") return <GenerationPage project={project} onRetry={actions.retryTask} onCancel={actions.cancelTask} onNavigate={actions.navigate} />;
   if (activeNav === "时间线") return <TimelinePage project={project} />;
   if (activeNav === "质检") return <QCPage project={project} onReviewShot={actions.reviewShot} onRegenerate={actions.regenerateShot} />;

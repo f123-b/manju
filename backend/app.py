@@ -42,6 +42,7 @@ from .domain.repository import (
 from .domain.seed import seed_legacy_project
 from .providers.registry import ProviderRegistry
 from .services.export_service import export_project_package
+from .services.asset_generation_service import generate_asset_image
 from .services.script_service import generate_episode_matrix, generate_scene_script, generate_shot_breakdown
 from .services.task_engine import task_engine
 
@@ -262,6 +263,16 @@ async def post_asset(project_id: str, asset_type: str, payload: dict[str, Any] =
         return {"projectId": project_id, "asset": asset}
     except KeyError as error:
         raise not_found(str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/assets/generate")
+async def generate_asset(project_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    try:
+        return await generate_asset_image(project_id, payload or {}, registry)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except (RuntimeError, TimeoutError) as error:
+        raise HTTPException(status_code=502, detail=str(error)) from error
 
 
 @app.patch("/api/assets/{asset_id}")

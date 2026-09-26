@@ -65,6 +65,13 @@ export function createRemoteAsset(type, asset) {
   return request(`/projects/P001/${type}`, { method: "POST", body: JSON.stringify(asset) });
 }
 
+export function generateRemoteAsset(assetType, payload = {}) {
+  return request("/projects/P001/assets/generate", {
+    method: "POST",
+    body: JSON.stringify({ ...payload, assetType }),
+  });
+}
+
 export function patchRemoteScene(sceneId, patch) {
   return request(`/scenes/${sceneId}`, { method: "PATCH", body: JSON.stringify(patch) });
 }

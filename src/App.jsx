@@ -12,6 +12,7 @@ import {
   exportRemoteProject,
   generateRemoteBreakdown,
   generateRemoteMatrix,
+  generateRemoteAsset,
   generateRemoteSceneScript,
   generateRemoteShot,
   getRemoteHealth,
@@ -201,6 +202,22 @@ export function App() {
     createScene: (episodeId, payload) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return createRemoteScene(episodeId, payload);
+    },
+    generateAsset: (assetType, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteAsset(assetType, payload).then((response) => {
+        const asset = response.asset;
+        setProject((current) => ({
+          ...current,
+          assets: {
+            ...current.assets,
+            [assetType]: current.assets[assetType].some((item) => item.id === asset.id)
+              ? current.assets[assetType].map((item) => item.id === asset.id ? asset : item)
+              : [...current.assets[assetType], asset],
+          },
+        }));
+        return response;
+      });
     },
     saveScene: (sceneId, patch) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));

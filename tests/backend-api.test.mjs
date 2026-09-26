@@ -41,6 +41,26 @@ test("FastAPI boots a relational demo and completes a durable generation task", 
   assert.equal(project.shots.length, 6);
   assert.equal(project.assets.characters.length, 2);
 
+  const characterAssetResponse = await fetch(`http://127.0.0.1:${port}/api/projects/P001/assets/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ assetType: "characters", name: "测试人物", description: "黑发，冷静，电影感写实" }),
+  });
+  const characterAsset = await characterAssetResponse.json();
+  assert.equal(characterAssetResponse.ok, true);
+  assert.equal(characterAsset.asset.id, "C003");
+  assert.equal(characterAsset.asset.image, "/assets/shot-hero.png");
+
+  const locationAssetResponse = await fetch(`http://127.0.0.1:${port}/api/projects/P001/assets/generate`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ assetType: "locations", name: "测试天台", description: "夜晚城市天台" }),
+  });
+  const locationAsset = await locationAssetResponse.json();
+  assert.equal(locationAssetResponse.ok, true);
+  assert.equal(locationAsset.asset.id, "L002");
+  assert.equal(locationAsset.asset.image, "/assets/shot-wide.png");
+
   const createResponse = await fetch(`http://127.0.0.1:${port}/api/shots/SH046/generate`, {
     method: "POST",
     headers: { "content-type": "application/json" },
