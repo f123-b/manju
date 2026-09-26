@@ -3,7 +3,23 @@ import { CheckCircle, Sparkle } from "@phosphor-icons/react";
 import { Sidebar, Topbar } from "./components/Chrome.jsx";
 import { StoryboardWorkspace } from "./components/StoryboardWorkspace.jsx";
 import { ModulePage, SearchDialog } from "./components/ModulePages.jsx";
-import { generateRemoteShot, getRemoteHealth, getRemoteProject, saveRemoteProject } from "./apiClient.js";
+import {
+  cancelRemoteTask,
+  createRemoteAsset,
+  createRemoteShot,
+  deleteRemoteShot,
+  exportRemoteProject,
+  generateRemoteShot,
+  getRemoteHealth,
+  getRemoteProject,
+  patchRemoteAsset,
+  patchRemoteProject,
+  patchRemoteScene,
+  patchRemoteShot,
+  patchRemoteStoryBible,
+  retryRemoteTask,
+  saveRemoteProject,
+} from "./apiClient.js";
 import {
   addShot,
   addStoryRule,
@@ -75,9 +91,6 @@ export function App() {
 
   useEffect(() => {
     saveProject(project);
-    if (backendStatus === "online" && backendHydrated.current) {
-      saveRemoteProject(project).catch(() => setBackendStatus("offline"));
-    }
   }, [project, backendStatus]);
 
   useEffect(() => () => { timers.current.forEach((timer) => window.clearTimeout(timer)); }, []);
@@ -87,6 +100,10 @@ export function App() {
   const notify = useCallback((message, type = "done") => {
     setToast({ message, type });
     window.setTimeout(() => setToast(null), 2600);
+  }, []);
+
+  const persist = useCallback((operation) => {
+    operation.catch(() => setBackendStatus("offline"));
   }, []);
 
   const scheduleCompletion = useCallback((taskId, shotId) => {
@@ -147,14 +164,29 @@ export function App() {
     navigate: setActiveNav,
     backendStatus,
     providerInfo,
-    updateProject: (patch) => setProject((current) => ({ ...current, ...patch })),
-    updateStory: (field, value) => setProject((current) => updateStoryBible(current, field, value)),
-    addRule: (value) => setProject((current) => addStoryRule(current, value)),
-    removeRule: (index) => setProject((current) => removeStoryRule(current, index)),
+    updateProject: (patch) => {
+      setProject((current) => ({ ...current, ...patch }));
+      if (backendStatus === "online") persist(patchRemoteProject(patch));
+    },
+    updateStory: (field, value) => {
+      setProject((current) => updateStoryBible(current, field, value));
+      if (backendStatus === "online") persist(patchRemoteStoryBible({ [field]: value }));
+    },
+    addRule: (value) => {
+      const next = addStoryRule(project, value);
+      setProject(next);
+      if (backendStatus === "online" && next !== project) persist(patchRemoteStoryBible({ rules: next.storyBible.rules }));
+    },
+    removeRule: (index) => {
+      const next = removeStoryRule(project, index);
+      setProject(next);
+      if (backendStatus === "online") persist(patchRemoteStoryBible({ rules: next.storyBible.rules }));
+    },
     openEpisode: (episodeId) => {
       const firstShot = project.shots.find((shot) => shot.episodeId === episodeId);
       setProject((current) => ({ ...current, currentEpisodeId: episodeId }));
       setSelectedShotId(firstShot?.id || null);
+      if (backendStatus === "online") persist(patchRemoteProject({ currentEpisodeId: episodeId }));
       setActiveNav("分镜");
     },
     addAsset: (type) => {
@@ -163,26 +195,34 @@ export function App() {
         locations: { prefix: "L", name: "新场景", meta: "待完善", image: "/assets/shot-wide.png" },
         props: { prefix: "P", name: "新道具", meta: "待完善", image: "/assets/shot-woman.png" },
       }[type];
-      setProject((current) => {
-        const items = current.assets[type];
-        const item = { id: nextAssetId(items, config.prefix), name: config.name, meta: config.meta, description: "点击编辑资产描述。", image: config.image, status: "待确认" };
-        return { ...current, assets: { ...current.assets, [type]: [...items, item] } };
-      });
+      const item = { id: nextAssetId(project.assets[type], config.prefix), name: config.name, meta: config.meta, description: "点击编辑资产描述。", image: config.image, status: "待确认" };
+      setProject((current) => ({ ...current, assets: { ...current.assets, [type]: [...current.assets[type], item] } }));
+      if (backendStatus === "online") persist(createRemoteAsset(type, item));
       notify("已创建新资产");
     },
-    updateAsset: (type, id, patch) => setProject((current) => ({ ...current, assets: { ...current.assets, [type]: current.assets[type].map((item) => item.id === id ? { ...item, ...patch } : item) } })),
+    updateAsset: (type, id, patch) => {
+      setProject((current) => ({ ...current, assets: { ...current.assets, [type]: current.assets[type].map((item) => item.id === id ? { ...item, ...patch } : item) } }));
+      if (backendStatus === "online") persist(patchRemoteAsset(id, patch));
+    },
     cancelTask: (taskId) => {
       const timer = timers.current.get(taskId);
       if (timer) window.clearTimeout(timer);
       timers.current.delete(taskId);
       setProject((current) => cancelProjectTask(current, taskId));
+      if (backendStatus === "online") persist(cancelRemoteTask(taskId).then((response) => setProject(response.project)));
       notify("任务已取消");
     },
     retryTask: (taskId) => {
       const source = project.tasks.find((task) => task.id === taskId);
       if (!source) return;
       if (backendStatus === "online") {
-        generateShot(source.shotId, project.shots.find((shot) => shot.id === source.shotId)?.prompt || "");
+        retryRemoteTask(taskId).then((response) => {
+          setProject(response.project);
+          pollRemoteGeneration(response.task.id, source.shotId);
+        }).catch(() => {
+          setBackendStatus("offline");
+          notify("重试任务失败", "error");
+        });
         return;
       }
       const nextTaskId = `T${Date.now()}`;
@@ -190,23 +230,29 @@ export function App() {
       setToast({ message: `正在重试 ${source.shotId}…`, type: "loading" });
       scheduleCompletion(nextTaskId, source.shotId);
     },
-    reviewShot: (shotId) => setProject((current) => {
-      const shot = current.shots.find((item) => item.id === shotId);
-      return updateShot(current, shotId, { reviewed: !shot?.reviewed });
-    }),
+    reviewShot: (shotId) => {
+      const shot = project.shots.find((item) => item.id === shotId);
+      const reviewed = !shot?.reviewed;
+      setProject((current) => updateShot(current, shotId, { reviewed }));
+      if (backendStatus === "online") persist(patchRemoteShot(shotId, { reviewed }));
+    },
     regenerateShot: (shotId) => {
       const shot = project.shots.find((item) => item.id === shotId);
       if (shot) generateShot(shotId, shot.prompt);
     },
-    exportProject: () => {
-      const blob = new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${project.title}-project.json`;
-      link.click();
-      URL.revokeObjectURL(url);
-      notify("项目包已导出");
+    exportProject: async () => {
+      try {
+        const blob = backendStatus === "online" ? await exportRemoteProject() : new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = backendStatus === "online" ? `${project.title}-project-package.zip` : `${project.title}-project.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        notify("项目包已导出");
+      } catch {
+        notify("导出失败，请稍后重试", "error");
+      }
     },
   };
 
@@ -214,6 +260,7 @@ export function App() {
     const result = addShot(project);
     setProject(result.project);
     setSelectedShotId(result.shot.id);
+    if (backendStatus === "online") persist(createRemoteShot(result.shot.sceneId, result.shot));
     notify(`已添加 ${result.shot.id}`);
   };
 
@@ -222,6 +269,7 @@ export function App() {
     if (!result.shot) return;
     setProject(result.project);
     setSelectedShotId(result.shot.id);
+    if (backendStatus === "online") persist(createRemoteShot(result.shot.sceneId, result.shot));
     notify(`已复制为 ${result.shot.id}`);
   };
 
@@ -232,6 +280,7 @@ export function App() {
     const nextShot = nextProject.shots[Math.min(currentIndex, nextProject.shots.length - 1)];
     setProject(nextProject);
     setSelectedShotId(nextShot?.id || null);
+    if (backendStatus === "online") persist(deleteRemoteShot(shotId));
     notify(`${shotId} 已删除`);
   };
 
@@ -239,6 +288,7 @@ export function App() {
     const firstShot = project.shots.find((shot) => shot.episodeId === episodeId);
     setProject((current) => ({ ...current, currentEpisodeId: episodeId }));
     setSelectedShotId(firstShot?.id || null);
+    if (backendStatus === "online") persist(patchRemoteProject({ currentEpisodeId: episodeId }));
   };
 
   const openSearchResult = (result) => {
@@ -271,8 +321,14 @@ export function App() {
               onAddShot={addNewShot}
               onDuplicateShot={duplicateCurrentShot}
               onDeleteShot={deleteCurrentShot}
-              onUpdateShot={(shotId, patch) => setProject((current) => updateShot(current, shotId, patch))}
-              onUpdateScene={(patch) => setProject((current) => ({ ...current, currentScene: { ...current.currentScene, ...patch } }))}
+              onUpdateShot={(shotId, patch) => {
+                setProject((current) => updateShot(current, shotId, patch));
+                if (backendStatus === "online") persist(patchRemoteShot(shotId, patch));
+              }}
+              onUpdateScene={(patch) => {
+                setProject((current) => ({ ...current, currentScene: { ...current.currentScene, ...patch } }));
+                if (backendStatus === "online" && project.currentScene?.id) persist(patchRemoteScene(project.currentScene.id, patch));
+              }}
               onGenerate={generateShot}
               onEpisodeChange={changeEpisode}
             />

@@ -12,7 +12,7 @@ export function loadProject(storage = globalThis.localStorage) {
     const saved = storage.getItem(STORAGE_KEY);
     if (!saved) return cloneProject();
     const parsed = JSON.parse(saved);
-    return parsed?.schemaVersion === 1 ? parsed : cloneProject();
+    return parsed?.schemaVersion >= 1 ? parsed : cloneProject();
   } catch {
     return cloneProject();
   }
