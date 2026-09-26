@@ -6,13 +6,19 @@ import { ModulePage, SearchDialog } from "./components/ModulePages.jsx";
 import {
   cancelRemoteTask,
   createRemoteAsset,
+  createRemoteScene,
   createRemoteShot,
   deleteRemoteShot,
   exportRemoteProject,
+  generateRemoteBreakdown,
+  generateRemoteMatrix,
+  generateRemoteSceneScript,
   generateRemoteShot,
   getRemoteHealth,
   getRemoteProject,
+  getRemoteScenes,
   patchRemoteAsset,
+  patchRemoteEpisode,
   patchRemoteProject,
   patchRemoteScene,
   patchRemoteShot,
@@ -171,6 +177,46 @@ export function App() {
     updateStory: (field, value) => {
       setProject((current) => updateStoryBible(current, field, value));
       if (backendStatus === "online") persist(patchRemoteStoryBible({ [field]: value }));
+    },
+    loadScenes: (episodeId) => {
+      if (backendStatus === "online") return getRemoteScenes(episodeId);
+      if (episodeId === project.currentEpisodeId && project.currentScene) return Promise.resolve([{ ...project.currentScene, episodeId, order: project.currentScene.number, script: {} }]);
+      return Promise.resolve([]);
+    },
+    saveEpisode: (episodeId, patch) => {
+      setProject((current) => ({ ...current, episodes: current.episodes.map((episode) => episode.id === episodeId ? { ...episode, ...patch, hook: patch.hook ?? episode.hook, openingHook: patch.hook ?? episode.openingHook } : episode) }));
+      if (backendStatus === "online") return patchRemoteEpisode(episodeId, patch).then((episode) => {
+        setProject((current) => ({ ...current, episodes: current.episodes.map((item) => item.id === episodeId ? { ...item, ...episode } : item) }));
+        return episode;
+      });
+      return Promise.resolve({ ...project.episodes.find((episode) => episode.id === episodeId), ...patch });
+    },
+    generateMatrix: (episodeId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteMatrix(episodeId, payload).then((episode) => {
+        setProject((current) => ({ ...current, episodes: current.episodes.map((item) => item.id === episodeId ? { ...item, ...episode } : item) }));
+        return episode;
+      });
+    },
+    createScene: (episodeId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteScene(episodeId, payload);
+    },
+    saveScene: (sceneId, patch) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteScene(sceneId, patch);
+    },
+    generateSceneScript: (sceneId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteSceneScript(sceneId, payload);
+    },
+    generateBreakdown: (sceneId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteBreakdown(sceneId, payload).then(async (response) => {
+        const remoteProject = await getRemoteProject();
+        setProject(remoteProject);
+        return response.items || [];
+      });
     },
     addRule: (value) => {
       const next = addStoryRule(project, value);

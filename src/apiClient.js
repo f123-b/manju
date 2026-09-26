@@ -69,6 +69,30 @@ export function patchRemoteScene(sceneId, patch) {
   return request(`/scenes/${sceneId}`, { method: "PATCH", body: JSON.stringify(patch) });
 }
 
+export function getRemoteScenes(episodeId) {
+  return request(`/episodes/${episodeId}/scenes`).then((response) => response.items || []);
+}
+
+export function createRemoteScene(episodeId, scene) {
+  return request(`/episodes/${episodeId}/scenes`, { method: "POST", body: JSON.stringify(scene) });
+}
+
+export function patchRemoteEpisode(episodeId, patch) {
+  return request(`/episodes/${episodeId}`, { method: "PATCH", body: JSON.stringify(patch) });
+}
+
+export function generateRemoteMatrix(episodeId, payload = {}) {
+  return request(`/episodes/${episodeId}/matrix`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function generateRemoteSceneScript(sceneId, payload = {}) {
+  return request(`/scenes/${sceneId}/script`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function generateRemoteBreakdown(sceneId, payload = {}) {
+  return request(`/scenes/${sceneId}/breakdown`, { method: "POST", body: JSON.stringify(payload) });
+}
+
 export function cancelRemoteTask(taskId) {
   return request(`/generation-tasks/${taskId}/cancel`, { method: "POST" });
 }

@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ArrowRight,
   Check,
@@ -43,6 +43,114 @@ function StoryPage({ project, onUpdateStory, onAddRule, onRemoveRule }) {
   ];
   return <div className="module-page"><PageHeader eyebrow="Story Bible" title="故事圣经" description="所有后续剧本、资产和镜头生成都以这里的规则为准。" />
     <div className="story-layout"><section className="module-section story-form">{fields.map(([field, label]) => <label key={field}><span>{label}</span><textarea value={project.storyBible[field]} onChange={(event) => onUpdateStory(field, event.target.value)} /></label>)}</section><section className="module-section rules-panel"><div className="section-heading"><div><h2>故事规则</h2><p>AI 生成剧情时不可违反。</p></div></div><div className="rule-list">{project.storyBible.rules.map((rule, index) => <div key={`${rule}-${index}`}><span>{index + 1}</span><p>{rule}</p><button type="button" aria-label="删除规则" onClick={() => onRemoveRule(index)}><Trash size={15} /></button></div>)}</div><form onSubmit={(event) => { event.preventDefault(); onAddRule(newRule); setNewRule(""); }}><input value={newRule} onChange={(event) => setNewRule(event.target.value)} placeholder="添加一条不能被违反的规则" /><button type="submit"><Plus size={16} />添加</button></form></section></div>
+  </div>;
+}
+
+const scriptSteps = [
+  ["bible", "故事圣经", "统一规则"],
+  ["matrix", "剧集矩阵", "拆出本集节奏"],
+  ["scene", "场景剧本", "写成可拍场景"],
+  ["breakdown", "分镜拆解", "进入生产"],
+];
+
+function episodeMatrix(project, episodeId) {
+  const episode = project.episodes.find((item) => item.id === episodeId) || {};
+  return {
+    hook: episode.hook || episode.openingHook || "",
+    coreEvent: episode.coreEvent || "",
+    payoff: episode.payoff || "",
+    twist: episode.twist || "",
+    endingHook: episode.endingHook || "",
+  };
+}
+
+function ScriptPage({ project, actions }) {
+  const [step, setStep] = useState("bible");
+  const [episodeId, setEpisodeId] = useState(project.currentEpisodeId);
+  const [sceneId, setSceneId] = useState(project.currentScene?.id || null);
+  const [scenes, setScenes] = useState([]);
+  const [matrix, setMatrix] = useState(() => episodeMatrix(project, project.currentEpisodeId));
+  const [sceneDraft, setSceneDraft] = useState({ title: "", purpose: "", summary: "", timeOfDay: "" });
+  const [scriptDraft, setScriptDraft] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState("");
+
+  const episode = project.episodes.find((item) => item.id === episodeId) || project.episodes[0];
+  const scene = scenes.find((item) => item.id === sceneId) || null;
+  const sceneShots = project.shots.filter((shot) => shot.sceneId === sceneId);
+  const currentStep = scriptSteps.findIndex(([id]) => id === step);
+
+  useEffect(() => {
+    setMatrix(episodeMatrix(project, episodeId));
+  }, [episodeId, project.episodes]);
+
+  useEffect(() => {
+    if (project.currentEpisodeId && project.currentEpisodeId !== episodeId) {
+      setEpisodeId(project.currentEpisodeId);
+    }
+  }, [project.currentEpisodeId]);
+
+  useEffect(() => {
+    let active = true;
+    setBusy(true);
+    actions.loadScenes(episodeId).then((items) => {
+      if (!active) return;
+      setScenes(items);
+      setSceneId((current) => items.some((item) => item.id === current) ? current : items[0]?.id || null);
+    }).catch(() => {
+      if (active) setNotice("场景读取失败，请检查 API 连接");
+    }).finally(() => active && setBusy(false));
+    return () => { active = false; };
+  }, [episodeId]);
+
+  useEffect(() => {
+    if (!scene) {
+      setSceneDraft({ title: "", purpose: "", summary: "", timeOfDay: "" });
+      setScriptDraft("");
+      return;
+    }
+    setSceneDraft({ title: scene.title || "", purpose: scene.purpose || "", summary: scene.summary || "", timeOfDay: scene.timeOfDay || "" });
+    setScriptDraft((scene.script?.beats || []).map((beat) => beat.text || "").join("\n"));
+  }, [sceneId, scenes]);
+
+  const run = async (operation, successMessage, after) => {
+    setBusy(true);
+    setNotice("");
+    try {
+      const result = await operation();
+      after?.(result);
+      setNotice(successMessage);
+    } catch (error) {
+      setNotice(error?.message || "操作失败，请稍后重试");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveMatrix = () => run(() => actions.saveEpisode(episodeId, matrix), "本集矩阵已保存");
+  const generateMatrix = () => run(() => actions.generateMatrix(episodeId, matrix), "已生成一版剧集矩阵", (result) => setMatrix(episodeMatrix({ episodes: [result] }, episodeId)));
+  const createScene = () => run(() => actions.createScene(episodeId, { title: `场景 ${scenes.length + 1}`, summary: matrix.coreEvent, purpose: matrix.coreEvent, timeOfDay: "夜晚" }), "已创建场景", (result) => { setScenes((current) => [...current, result]); setSceneId(result.id); setStep("scene"); });
+  const saveScene = () => run(() => actions.saveScene(sceneId, sceneDraft), "场景信息已保存", (result) => setScenes((current) => current.map((item) => item.id === sceneId ? result : item)));
+  const generateScript = () => {
+    const beats = scriptDraft.split("\n").map((text) => text.trim()).filter(Boolean).map((text, index) => ({ type: index === 1 ? "dialogue" : "action", text }));
+    return run(() => actions.generateSceneScript(sceneId, { ...sceneDraft, script: beats.length ? { beats } : undefined }), "已生成场景剧本", (result) => { setScenes((current) => current.map((item) => item.id === sceneId ? result : item)); setScriptDraft((result.script?.beats || []).map((beat) => beat.text || "").join("\n")); });
+  };
+  const generateBreakdown = () => run(() => actions.generateBreakdown(sceneId), "已生成分镜拆解");
+
+  const goNext = () => {
+    const next = scriptSteps[currentStep + 1];
+    if (next) setStep(next[0]);
+  };
+
+  return <div className="module-page script-page">
+    <PageHeader eyebrow="Script Pipeline" title="剧本工作台" description="把故事规则逐步落成剧集矩阵、场景剧本和可生成的分镜。每一步都能保存，随时继续。" action={<div className="script-header-meta"><span>{episode?.id} {episode?.title}</span><strong>{currentStep + 1} / {scriptSteps.length}</strong></div>} />
+    <nav className="script-stepper" aria-label="剧本生产流程">{scriptSteps.map(([id, label, hint], index) => <button className={step === id ? "is-active" : index < currentStep ? "is-done" : ""} key={id} type="button" onClick={() => setStep(id)}><i>{index < currentStep ? <Check size={13} weight="bold" /> : index + 1}</i><span><strong>{label}</strong><small>{hint}</small></span>{index < scriptSteps.length - 1 && <ArrowRight size={15} />}</button>)}</nav>
+    <div className="script-toolbar"><label>当前剧集<select value={episodeId} onChange={(event) => { setEpisodeId(event.target.value); actions.updateProject({ currentEpisodeId: event.target.value }); }}><option value="">选择剧集</option>{project.episodes.map((item) => <option key={item.id} value={item.id}>{item.id}　{item.title}</option>)}</select></label><span className="script-save-state">{busy ? "处理中…" : notice || "所有修改都保存到项目数据库"}</span><button type="button" onClick={() => actions.openEpisode(episodeId)}>进入分镜 <ArrowRight size={15} /></button></div>
+    {step === "bible" && <div className="story-layout script-stage"><section className="module-section story-form"><div className="section-heading script-section-heading"><div><h2>先固定故事边界</h2><p>后面的矩阵、场景和镜头都从这里继承。</p></div></div>{[["logline", "一句话梗概"], ["coreConflict", "核心冲突"], ["mainLine", "故事主线"], ["theme", "主题"], ["ending", "最终结局"], ["world", "世界观"], ["style", "视觉风格"]].map(([field, label]) => <label key={field}><span>{label}</span><textarea value={project.storyBible[field]} onChange={(event) => actions.updateStory(field, event.target.value)} /></label>)}</section><section className="module-section rules-panel"><div className="section-heading"><div><h2>不可违反的规则</h2><p>生成时自动带入。</p></div></div><div className="rule-list">{project.storyBible.rules.map((rule, index) => <div key={`${rule}-${index}`}><span>{index + 1}</span><p>{rule}</p><button type="button" aria-label="删除规则" onClick={() => actions.removeRule(index)}>×</button></div>)}</div><form onSubmit={(event) => { event.preventDefault(); const input = event.currentTarget.elements.rule.value; actions.addRule(input); event.currentTarget.reset(); }}><input name="rule" placeholder="例如：角色在第 08 集前不能知道真相" /><button type="submit"><Plus size={16} />添加规则</button></form></section></div>}
+    {step === "matrix" && <div className="script-grid script-stage"><aside className="module-section script-episode-list"><div className="section-heading"><div><h2>剧集列表</h2><p>先明确每集要推进什么。</p></div></div>{project.episodes.map((item) => <button className={item.id === episodeId ? "is-active" : ""} key={item.id} type="button" onClick={() => setEpisodeId(item.id)}><strong>{item.id}</strong><span>{item.title}</span><em>{item.status}</em></button>)}</aside><section className="module-section script-editor"><div className="section-heading"><div><h2>{episode?.id} 剧集矩阵</h2><p>用五个问题锁定本集节奏，避免直接跳到镜头。</p></div><div className="script-editor-actions"><button type="button" onClick={saveMatrix} disabled={busy}>保存</button><button className="primary-action" type="button" onClick={generateMatrix} disabled={busy}><Sparkle size={16} />生成矩阵</button></div></div><div className="matrix-form">{[["hook", "开场钩子", "观众为什么要继续看？"], ["coreEvent", "核心事件", "本集真正发生了什么？"], ["payoff", "情绪回收", "这一集给观众什么兑现？"], ["twist", "转折线索", "哪里改变了观众的判断？"], ["endingHook", "结尾钩子", "下一集从哪个问题开始？"]].map(([field, label, placeholder]) => <label key={field}><span>{label}</span><textarea value={matrix[field]} placeholder={placeholder} onChange={(event) => setMatrix((current) => ({ ...current, [field]: event.target.value }))} /></label>)}</div></section></div>}
+    {step === "scene" && <div className="script-grid script-stage"><aside className="module-section script-episode-list scene-list"><div className="section-heading"><div><h2>场景列表</h2><p>{episode?.id} 的可拍场景。</p></div><button type="button" onClick={createScene}><Plus size={15} />新增</button></div>{scenes.map((item) => <button className={item.id === sceneId ? "is-active" : ""} key={item.id} type="button" onClick={() => setSceneId(item.id)}><strong>场景 {item.order}</strong><span>{item.title}</span><em>{item.script?.beats?.length ? "已写" : "待写"}</em></button>)}{!scenes.length && <div className="script-empty"><FileText size={20} /><strong>还没有场景</strong><span>从本集矩阵创建第一个可拍场景。</span><button type="button" onClick={createScene}>创建场景</button></div>}</aside><section className="module-section script-editor"><div className="section-heading"><div><h2>{scene ? scene.title : "场景剧本"}</h2><p>先说清楚场景目的，再生成对白和动作节拍。</p></div>{scene && <div className="script-editor-actions"><button type="button" onClick={saveScene} disabled={busy}>保存场景</button><button className="primary-action" type="button" onClick={generateScript} disabled={busy}><Sparkle size={16} />生成剧本</button></div>}</div>{scene ? <div className="scene-script-form"><div className="scene-meta-form"><label>场景名称<input value={sceneDraft.title} onChange={(event) => setSceneDraft((current) => ({ ...current, title: event.target.value }))} /></label><label>时间<select value={sceneDraft.timeOfDay} onChange={(event) => setSceneDraft((current) => ({ ...current, timeOfDay: event.target.value }))}><option value="">未设定</option><option>白天</option><option>夜晚</option><option>黄昏</option></select></label></div><label>场景目的<textarea value={sceneDraft.purpose} onChange={(event) => setSceneDraft((current) => ({ ...current, purpose: event.target.value }))} placeholder="这个场景结束时，人物关系发生什么变化？" /></label><label>场景摘要<textarea value={sceneDraft.summary} onChange={(event) => setSceneDraft((current) => ({ ...current, summary: event.target.value }))} placeholder="用 2-3 句话描述可拍内容" /></label><label className="beat-editor">动作与对白节拍<textarea value={scriptDraft} onChange={(event) => setScriptDraft(event.target.value)} placeholder="每行一个节拍，例如：\n林泽走到天台边，停下。\n苏晴：你真的要走吗？\n林泽没有回头。" /><small>每行会成为一个动作或对白节拍，生成后可继续修改。</small></label></div> : <div className="script-empty large"><FileText size={25} /><strong>从左侧创建场景</strong><span>场景是剧集矩阵进入分镜生产的桥梁。</span></div>}</section></div>}
+    {step === "breakdown" && <div className="module-section script-breakdown script-stage"><div className="section-heading"><div><h2>{scene ? `${scene.title} · 分镜拆解` : "分镜拆解"}</h2><p>把场景节拍转成镜头、景别和生成任务。</p></div><div className="script-editor-actions">{scene && <button className="primary-action" type="button" onClick={generateBreakdown} disabled={busy}><Sparkle size={16} />生成分镜拆解</button>}</div></div>{scene ? <><div className="breakdown-meta"><span><strong>{scene.id}</strong> {scene.purpose || "尚未填写场景目的"}</span><span>{sceneShots.length} 个镜头</span></div>{sceneShots.length ? <div className="breakdown-list">{sceneShots.map((shot, index) => <div key={shot.id}><span className="breakdown-index">{String(index + 1).padStart(2, "0")}</span><img src={shot.image} alt="" /><div><strong>{shot.description}</strong><small>{shot.dialogue || "无对白"}</small></div><em>{shot.size}</em><span>{shot.duration}s</span><span className={`task-status ${shot.status}`}>{shot.status}</span><button type="button" onClick={() => actions.openEpisode(episodeId)}>编辑<ArrowRight size={14} /></button></div>)}</div> : <div className="script-empty large"><Sparkle size={25} /><strong>还没有分镜拆解</strong><span>完成场景剧本后，点击右上角生成第一版镜头。</span></div>}</> : <div className="script-empty large"><FileText size={25} /><strong>先选择一个场景</strong><span>回到场景剧本步骤创建或选择场景。</span></div>}</div>}
+    <div className="script-footer"><span>{notice || "流程建议：先完成矩阵，再进入场景和分镜。"}</span><div>{currentStep > 0 && <button type="button" onClick={() => setStep(scriptSteps[currentStep - 1][0])}>上一步</button>}{currentStep < scriptSteps.length - 1 && <button className="primary-action" type="button" onClick={goNext}>下一步 <ArrowRight size={15} /></button>}</div></div>
   </div>;
 }
 
@@ -98,7 +206,7 @@ function SettingsPage({ project, onUpdateProject, backendStatus, providerInfo })
 
 export function ModulePage({ activeNav, project, stats, actions }) {
   if (activeNav === "概览") return <OverviewPage project={project} stats={stats} onNavigate={actions.navigate} />;
-  if (activeNav === "故事") return <StoryPage project={project} onUpdateStory={actions.updateStory} onAddRule={actions.addRule} onRemoveRule={actions.removeRule} />;
+  if (activeNav === "故事") return <ScriptPage project={project} actions={actions} />;
   if (activeNav === "剧集") return <EpisodesPage project={project} onOpenEpisode={actions.openEpisode} />;
   if (activeNav === "素材库") return <AssetsPage project={project} onAddAsset={actions.addAsset} onUpdateAsset={actions.updateAsset} />;
   if (activeNav === "生成") return <GenerationPage project={project} onRetry={actions.retryTask} onCancel={actions.cancelTask} onNavigate={actions.navigate} />;
