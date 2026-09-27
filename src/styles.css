@@ -751,6 +751,14 @@ button { color: inherit; }
 .model-discovery-group small { min-width: 14px; padding: 2px 4px; border-radius: 8px; color: #477ebd; background: #edf4ff; font-size: 8px; text-align: center; }
 .model-discovery-group p { display: flex; flex-wrap: wrap; gap: 4px; margin: 6px 0 0; }
 .model-discovery-group p span { max-width: 100%; overflow: hidden; padding: 3px 5px; border: 1px solid #e3eaf2; border-radius: 3px; color: #6d7b8e; background: #fafcff; font-family: ui-monospace, monospace; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.provider-async-card { max-width: 840px; display: grid; gap: 10px; margin-top: 18px; padding: 18px 24px; }
+.provider-async-card h2 { margin: 6px 0 5px; color: #2c3b50; font-size: 15px; }
+.provider-async-card p { margin: 0; color: #718094; font-size: 10px; line-height: 1.6; }
+.provider-async-form { display: flex; gap: 8px; }
+.provider-async-form input { min-width: 0; flex: 1; min-height: 34px; padding: 7px 9px; border: 1px solid #dfe5ed; border-radius: 5px; outline: 0; color: #344257; background: #fff; font-size: 10px; }
+.provider-async-form button { height: 34px; padding: 0 12px; border: 1px solid #dbe4ef; border-radius: 4px; color: #3978bd; background: #fff; cursor: pointer; font-size: 10px; }
+.provider-async-form button:disabled { opacity: .45; cursor: not-allowed; }
+.provider-async-card > small { color: #2f845b; font-size: 9px; }
 
 /* Audio Engine workspace */
 .audio-runtime { padding: 7px 10px; border: 1px solid #dce6f3; border-radius: 5px; color: #59718e; background: #f7faff; font-size: 10px; }

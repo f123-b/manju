@@ -747,7 +747,9 @@ def complete_generation_task(task_id: str, result: dict[str, Any]) -> str:
         if not task:
             raise KeyError(f"task {task_id} not found")
         if task["target_type"] == "asset":
-            output_url = result.get("output_url") or result.get("image_url") or result.get("url") or "/assets/shot-wide.png"
+            output_url = result.get("output_url") or result.get("image_url") or result.get("url")
+            if not output_url:
+                raise ValueError("图片生成接口未返回 output_url、image_url 或 url")
             asset_type = loads(task["parameters_json"], {}).get("assetType")
             table = asset_type if asset_type in {"characters", "locations", "props"} else "locations"
             connection.execute(f"UPDATE {table} SET image = ?, status = '已生成', updated_at = ? WHERE id = ?", (output_url, now_text(), task["target_id"]))
@@ -776,7 +778,9 @@ def complete_generation_task(task_id: str, result: dict[str, Any]) -> str:
             connection.execute("INSERT INTO cost_records(id, project_id, task_id, provider, model, category, estimated_cost, actual_cost, status) VALUES (?, ?, ?, ?, ?, 'voice', ?, ?, 'actual')", (new_id("COST-"), task["project_id"], task_id, task["provider"], task["model"], task["estimated_cost"], actual_cost))
             return task["project_id"]
         if task["target_type"] == "character_reference":
-            output_url = result.get("output_url") or result.get("image_url") or result.get("url") or "/assets/shot-hero.png"
+            output_url = result.get("output_url") or result.get("image_url") or result.get("url")
+            if not output_url:
+                raise ValueError("人物参考图接口未返回图片地址")
             media_asset_id = new_id("MEDIA-")
             connection.execute("INSERT INTO media_assets(id, project_id, type, path_or_url, source, provider, model, prompt, metadata_json) VALUES (?, ?, 'character_reference', ?, 'provider', ?, ?, ?, ?)", (media_asset_id, task["project_id"], output_url, task["provider"], task["model"], task["prompt"], dumps({"targetType": task["target_type"], "targetId": task["target_id"]})))
             connection.execute("UPDATE character_references SET media_asset_id = ?, lifecycle_status = 'generated', quality_score = ?, updated_at = ? WHERE id = ?", (media_asset_id, result.get("qc_score", 91), now_text(), task["target_id"]))
@@ -811,6 +815,8 @@ def complete_generation_task(task_id: str, result: dict[str, Any]) -> str:
         next_version = connection.execute("SELECT COALESCE(MAX(version_number), 0) + 1 AS next FROM generation_versions WHERE shot_id = ?", (shot["id"],)).fetchone()["next"]
         media_asset_id = None
         output_url = result.get("output_url") or result.get("video_url")
+        if not output_url:
+            raise ValueError("视频生成接口未返回 output_url 或 video_url")
         if output_url:
             media_asset_id = new_id("MEDIA-")
             connection.execute("INSERT INTO media_assets(id, project_id, type, path_or_url, source, provider, model, prompt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)", (media_asset_id, task["project_id"], "generated_video", output_url, "provider", task["provider"], task["model"], task["prompt"]))

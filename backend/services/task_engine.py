@@ -77,6 +77,10 @@ class TaskEngine:
 
     async def _process(self, task: dict[str, Any]) -> None:
         task_id = task["id"]
+        # FastAPI settings and the durable worker are separate objects. Reload
+        # before every task so a newly saved API key/model is used immediately
+        # instead of leaving the worker on the startup-time mock provider.
+        self.registry.reload()
         if task.get("target_type") == "agent_run":
             from .agent_service import run_agent_task
 

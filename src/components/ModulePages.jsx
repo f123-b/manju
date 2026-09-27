@@ -664,6 +664,24 @@ function ModelDiscoveryPanel({ actions, backendStatus }) {
   return <section className="module-section model-discovery-card"><div className="model-discovery-heading"><div><span className="section-kicker">MODEL DISCOVERY</span><h2>自动模型目录</h2><p>保存 API 后自动读取 /models，并按文本、视觉、图片、视频、音频和向量模型分类。</p></div><span className="status-pill success">已接入</span></div><div className="model-discovery-columns"><div><div className="model-discovery-toolbar"><strong>图片 / 视频 Provider</strong><button type="button" onClick={() => refresh("media")} disabled={busy === "media"}>{busy === "media" ? "读取中…" : "刷新模型"}</button></div><ModelDiscoveryResult catalog={catalogs.media} /></div><div><div className="model-discovery-toolbar"><strong>LLM / Agent Provider</strong><button type="button" onClick={() => refresh("llm")} disabled={busy === "llm"}>{busy === "llm" ? "读取中…" : "刷新模型"}</button></div><ModelDiscoveryResult catalog={catalogs.llm} /></div></div>{notice && <div className="settings-api-notice">{notice}</div>}</section>;
 }
 
+function ProviderAsyncSettings({ actions, backendStatus }) {
+  const [statusUrl, setStatusUrl] = useState("");
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (backendStatus !== "online") return;
+    actions.getProviderSettings().then((settings) => setStatusUrl(settings.providerStatusUrl || "")).catch(() => {});
+  }, [backendStatus]);
+  const save = async () => {
+    try {
+      await actions.saveProviderSettings({ providerStatusUrl: statusUrl });
+      setNotice("异步状态地址已保存");
+    } catch (error) {
+      setNotice(error?.message || "保存失败");
+    }
+  };
+  return <section className="module-section provider-async-card"><div><span className="section-kicker">ASYNC TASK ADAPTER</span><h2>异步任务状态地址（可选）</h2><p>如果生成接口只返回 task_id，没有返回 status_url，请填写任务查询地址模板。</p></div><div className="provider-async-form"><input value={statusUrl} onChange={(event) => setStatusUrl(event.target.value)} placeholder="https://api.example.com/tasks/{task_id}" /><button type="button" onClick={save} disabled={backendStatus !== "online"}>保存</button></div>{notice && <small>{notice}</small>}</section>;
+}
+
 export function ModulePage({ activeNav, project, stats, actions }) {
   if (activeNav === "Agent") return <AgentPage project={project} stats={stats} actions={actions} />;
   if (activeNav === "概览") return <OverviewPage project={project} stats={stats} onNavigate={actions.navigate} />;
@@ -676,7 +694,7 @@ export function ModulePage({ activeNav, project, stats, actions }) {
   if (activeNav === "时间线") return <TimelinePage project={project} actions={actions} />;
   if (activeNav === "质检") return <QCPage project={project} actions={actions} onReviewShot={actions.reviewShot} onRegenerate={actions.regenerateShot} />;
   if (activeNav === "导出") return <ExportPage project={project} onExport={actions.exportProject} />;
-  return <><SettingsPage project={project} onUpdateProject={actions.updateProject} backendStatus={actions.backendStatus} providerInfo={actions.providerInfo} actions={actions} /><ModelDiscoveryPanel actions={actions} backendStatus={actions.backendStatus} /></>;
+  return <><SettingsPage project={project} onUpdateProject={actions.updateProject} backendStatus={actions.backendStatus} providerInfo={actions.providerInfo} actions={actions} /><ModelDiscoveryPanel actions={actions} backendStatus={actions.backendStatus} /><ProviderAsyncSettings actions={actions} backendStatus={actions.backendStatus} /></>;
 }
 
 export function SearchDialog({ open, project, onClose, onOpenResult }) {

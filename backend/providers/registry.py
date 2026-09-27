@@ -16,6 +16,7 @@ class ProviderRegistry:
             "providerUrl": os.environ.get("SHORT_DRAMA_PROVIDER_URL", ""),
             "providerName": os.environ.get("SHORT_DRAMA_PROVIDER_NAME", "External Video API"),
             "providerModel": os.environ.get("SHORT_DRAMA_PROVIDER_MODEL", "video-default"),
+            "providerStatusUrl": os.environ.get("SHORT_DRAMA_PROVIDER_STATUS_URL", ""),
             "providerApiKey": os.environ.get("SHORT_DRAMA_PROVIDER_API_KEY", ""),
             "voiceProvider": os.environ.get("SHORT_DRAMA_VOICE_PROVIDER", "mock"),
             "voiceModel": os.environ.get("SHORT_DRAMA_VOICE_PROVIDER_MODEL", "voice-default"),
@@ -33,6 +34,7 @@ class ProviderRegistry:
         self.external_url = settings.get("providerUrl") or None
         self.external_name = settings.get("providerName") or "External Video API"
         self.external_model = settings.get("providerModel") or "video-default"
+        self.external_status_url = settings.get("providerStatusUrl") or None
         self.api_key = settings.get("providerApiKey") or None
         self.voice_provider = (settings.get("voiceProvider") or "mock").lower()
         self.voice_endpoints = {
@@ -56,7 +58,7 @@ class ProviderRegistry:
         if kind == "workflow" and (not provider or provider == "RunningHub"):
             return RunningHubProvider(self.runninghub_url, self.runninghub_api_key, model or "workflow")
         if kind in {"image", "video"} and self.external_url and (not provider or provider == self.external_name):
-            return HttpProvider(kind, self.external_url, self.external_name, model or self.external_model, self.api_key)
+            return HttpProvider(kind, self.external_url, self.external_name, model or self.external_model, self.api_key, self.external_status_url)
         if kind == "audio":
             provider_key = (provider or self.voice_provider or "mock").lower()
             endpoint = self.voice_endpoints.get(provider_key)
