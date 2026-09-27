@@ -87,6 +87,19 @@ Short Drama OS 在服务端通过 `SHORT_DRAMA_PROVIDER_URL` 发起一个 JSON `
 
 服务端会每 2 秒轮询 `status_url`，直到返回 `Success`、`Failed` 或 `Cancelled`。完成后，视频地址会保存到镜头版本的 `outputUrl` 字段，任务状态会同步到“生成”页面。
 
+视觉 QC 约定：默认执行本地图片解码、尺寸、画幅、曝光和角色绑定检查；当 `llmProviderUrl` 已配置时，`POST /api/shots/{shot_id}/qc` 和 `POST /api/projects/{project_id}/qc` 会向 OpenAI 兼容的 `/chat/completions` 发送结构化多模态请求。镜头图片会以本地 data URL 或远程 URL 放入 `image_url`，模型返回的 `vision_semantic` 结论会写入 `qc_records`，不会覆盖本地检查。
+
+视频时间线片段的 `timelineStartMs`、`sourceStartMs` 和 `durationMs` 会在 `POST /api/episodes/{episode_id}/render` 时生效：图片作为帧序列，`.mp4/.mov/.mkv/.webm` 等本地视频按源起点裁切；片段之间的空隙输出黑场，重叠片段按时间线顺序叠加。渲染需要本机可用 FFmpeg，结果保存在 `data/generated-video` 并通过 `/generated-media/{filename}` 提供访问。
+
+LLM / Agent 配置字段：
+
+```env
+SHORT_DRAMA_LLM_PROVIDER_URL=http://127.0.0.1:11434/v1
+SHORT_DRAMA_LLM_PROVIDER_NAME=OpenAI Compatible
+SHORT_DRAMA_LLM_MODEL=gpt-4o-mini
+SHORT_DRAMA_LLM_API_KEY=
+```
+
 环境变量：
 
 ```env

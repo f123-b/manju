@@ -500,8 +500,22 @@ function TimelinePage({ project, actions }) {
 
 function QCPage({ project, actions, onReviewShot, onRegenerate }) {
   const shots = project.shots.filter((shot) => shot.episodeId === project.currentEpisodeId);
-  const run = (operation) => operation().catch(() => {});
-  return <div className="module-page"><PageHeader eyebrow="AI QC" title="质量检查" description="检查角色一致性、画面连续性和镜头生产状态。" action={<div className="page-header-actions"><button type="button" onClick={() => run(actions.runProjectQC)}>运行视觉 QC</button><button className="primary-action" type="button" onClick={() => run(actions.runContinuityCheck)}>检查连续性</button></div>} />
+  const [runNotice, setRunNotice] = useState("");
+  const run = async (operation, kind) => {
+    try {
+      const result = await operation();
+      if (kind === "visual") {
+        const semanticChecks = (result.visual || []).flatMap((item) => item.checks || []).filter((item) => item.type === "vision_semantic");
+        setRunNotice(semanticChecks.length ? `视觉 QC 已完成：本次有 ${semanticChecks.length} 条 LLM 语义结论写入 QC 记录。` : "视觉 QC 已完成：当前使用本地像素和规则检查；配置 LLM 后会追加语义检查。");
+      } else {
+        setRunNotice(`连续性检查已完成：${result.findings?.filter((item) => item.status !== "pass").length || 0} 个镜头需要复核。`);
+      }
+    } catch (error) {
+      setRunNotice(error?.message || "检查失败，请确认 FastAPI 和 Provider 配置");
+    }
+  };
+  return <div className="module-page"><PageHeader eyebrow="AI QC" title="质量检查" description="检查角色一致性、画面连续性和镜头生产状态；配置 LLM 后会追加图像语义审核。" action={<div className="page-header-actions"><button type="button" onClick={() => run(actions.runProjectQC, "visual")}>运行视觉 QC</button><button className="primary-action" type="button" onClick={() => run(actions.runContinuityCheck, "continuity")}>检查连续性</button></div>} />
+    {runNotice && <div className="qc-run-notice">{runNotice}</div>}
     <div className="qc-summary"><div><strong>{shots.filter((shot) => shot.qcScore >= 90).length}</strong><span>通过</span></div><div><strong>{shots.filter((shot) => shot.qcScore && shot.qcScore < 90).length}</strong><span>需复核</span></div><div><strong>{shots.filter((shot) => !shot.qcScore).length}</strong><span>未检测</span></div></div>
     <section className="module-section qc-list">{shots.map((shot) => <article key={shot.id}><img src={shot.image} alt="" /><div><span>{shot.id}</span><strong>{shot.description}</strong><small>{shot.qcScore ? `角色一致性 ${shot.qcScore}%` : "等待生成后检测"}</small></div><em className={shot.qcScore >= 90 ? "pass" : shot.qcScore ? "warning" : "pending"}>{shot.qcScore ? `${shot.qcScore}%` : "--"}</em><div>{shot.status === "已生成" && <button type="button" onClick={() => onReviewShot(shot.id)}>{shot.reviewed ? <CheckCircle size={16} weight="fill" /> : <Check size={16} />}{shot.reviewed ? "已审核" : "通过"}</button>}{shot.qcScore && shot.qcScore < 90 && <button type="button" onClick={() => onRegenerate(shot.id)}>重新生成</button>}</div></article>)}</section>
   </div>;

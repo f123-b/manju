@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createServer } from "node:http";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -121,4 +122,49 @@ test("persistent agent runs and project visual QC can be resumed through the API
     assert.match(mediaResponse.headers.get("content-type") || "", /video\/mp4/);
   }
   if (render.render.status === "blocked") assert.match(render.render.error, /FFmpeg/);
+});
+
+test("configured LLM vision QC sends an image and persists semantic findings", async (t) => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), "short-drama-vision-qc-"));
+  let requestBody;
+  const llmServer = createServer(async (request, response) => {
+    const chunks = [];
+    for await (const chunk of request) chunks.push(chunk);
+    requestBody = JSON.parse(Buffer.concat(chunks).toString("utf8"));
+    response.writeHead(200, { "content-type": "application/json" });
+    response.end(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ status: "warning", score: 86, findings: [{ type: "composition", severity: "warning", score: 86, confidence: 0.91, message: "人物与对白意图基本匹配，建议人工确认视线方向" }] }) } }] }));
+  });
+  await new Promise((resolve) => llmServer.listen(0, "127.0.0.1", resolve));
+  const llmPort = llmServer.address().port;
+  const port = 8127;
+  const server = spawn("python", ["-m", "uvicorn", "backend.app:app", "--host", "127.0.0.1", "--port", String(port)], {
+    cwd: root,
+    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "vision.sqlite3"), SHORT_DRAMA_DEMO_DELAY: "0.03" },
+    stdio: "ignore",
+  });
+  t.after(async () => {
+    server.kill();
+    await new Promise((resolve) => llmServer.close(resolve));
+    await rm(tempDir, { recursive: true, force: true });
+  });
+
+  const base = `http://127.0.0.1:${port}`;
+  await waitForHealth(base);
+  const settingsResponse = await fetch(`${base}/api/settings/providers`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ llmProviderUrl: `http://127.0.0.1:${llmPort}`, llmProviderName: "Vision Test", llmModel: "vision-test" }) });
+  assert.equal(settingsResponse.ok, true);
+
+  const qcResponse = await fetch(`${base}/api/shots/SH041/qc`, { method: "POST" });
+  const qc = await qcResponse.json();
+  assert.equal(qcResponse.ok, true);
+  assert.equal(qc.result.vision.status, "success");
+  assert.equal(qc.result.vision.provider, "Vision Test");
+  assert.ok(qc.result.checks.some((check) => check.type === "vision_semantic" && check.message.includes("视线方向")));
+  assert.equal(Array.isArray(requestBody.messages[1].content), true);
+  const imagePart = requestBody.messages[1].content.find((item) => item.type === "image_url");
+  assert.match(imagePart.image_url.url, /^data:image\/png;base64,/);
+
+  const recordsResponse = await fetch(`${base}/api/projects/P001/qc`);
+  const records = await recordsResponse.json();
+  assert.equal(recordsResponse.ok, true);
+  assert.ok(records.items.some((item) => item.type === "vision_semantic" && item.shot_id === "SH041"));
 });

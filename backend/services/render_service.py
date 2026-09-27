@@ -13,6 +13,9 @@ from ..domain.repository import dumps, new_id, now_text
 from ..domain.video_engine import ensure_video_clips
 
 
+VIDEO_SUFFIXES = {".avi", ".mkv", ".mov", ".mp4", ".m4v", ".webm"}
+
+
 def _ffmpeg_path() -> str | None:
     configured = os.environ.get("SHORT_DRAMA_FFMPEG", "").strip()
     if configured and Path(configured).is_file():
@@ -59,7 +62,7 @@ def render_episode_mp4(episode_id: str, payload: dict[str, Any] | None = None) -
         if not episode:
             raise KeyError(f"episode {episode_id} not found")
         clips = connection.execute(
-            """SELECT vc.id, vc.duration_ms, COALESCE(ma.path_or_url, s.image) AS source_url
+            """SELECT vc.id, vc.timeline_start_ms, vc.source_start_ms, vc.duration_ms, COALESCE(ma.path_or_url, s.image) AS source_url
                FROM video_clips vc JOIN shots s ON s.id = vc.shot_id
                LEFT JOIN generation_versions gv ON gv.shot_id = s.id AND gv.is_active = 1
                LEFT JOIN media_assets ma ON ma.id = gv.media_asset_id
@@ -72,13 +75,13 @@ def render_episode_mp4(episode_id: str, payload: dict[str, Any] | None = None) -
         connection.execute("INSERT INTO render_jobs(id, project_id, episode_id, status, metadata_json) VALUES (?, ?, ?, 'queued', ?)", (job_id, episode["project_id"], episode_id, dumps({"clipCount": len(clips), "audioMixdownId": mixdown["id"] if mixdown else None})))
 
     ffmpeg = _ffmpeg_path()
-    image_paths = [_local_media(row["source_url"]) for row in clips]
+    media_paths = [_local_media(row["source_url"]) for row in clips]
     if not ffmpeg:
         message = "未找到 FFmpeg。请安装 FFmpeg，或设置 SHORT_DRAMA_FFMPEG 指向 ffmpeg 可执行文件后重试。"
         with session() as connection:
             connection.execute("UPDATE render_jobs SET status = 'blocked', error_message = ?, completed_at = ? WHERE id = ?", (message, now_text(), job_id))
             return _render_dict(connection, job_id)
-    if not clips or any(path is None for path in image_paths):
+    if not clips or any(path is None for path in media_paths):
         message = "本集缺少可读取的镜头图像，无法执行 MP4 渲染。"
         with session() as connection:
             connection.execute("UPDATE render_jobs SET status = 'blocked', error_message = ?, completed_at = ? WHERE id = ?", (message, now_text(), job_id))
@@ -88,21 +91,34 @@ def render_episode_mp4(episode_id: str, payload: dict[str, Any] | None = None) -
     output_dir.mkdir(parents=True, exist_ok=True)
     output_file = output_dir / f"{job_id}.mp4"
     command = [ffmpeg, "-y"]
-    for row, path in zip(clips, image_paths):
+    timeline_duration = max((int(row["timeline_start_ms"] or 0) + int(row["duration_ms"] or 1000)) for row in clips) / 1000
+    timeline_duration = max(0.1, timeline_duration)
+    for row, path in zip(clips, media_paths):
         duration = max(0.1, float(row["duration_ms"] or 1000) / 1000)
-        command.extend(["-loop", "1", "-framerate", "30", "-t", str(duration), "-i", str(path)])
+        if path.suffix.lower() in VIDEO_SUFFIXES:
+            source_start = max(0, int(row["source_start_ms"] or 0)) / 1000
+            command.extend(["-ss", str(source_start), "-t", str(duration), "-i", str(path)])
+        else:
+            command.extend(["-loop", "1", "-framerate", "30", "-t", str(duration), "-i", str(path)])
     audio_index = len(clips)
     audio_path = _local_media(mixdown["audio_url"]) if mixdown and mixdown["audio_url"] else None
     if audio_path:
         command.extend(["-i", str(audio_path)])
-    filters = []
-    for index in range(len(clips)):
-        filters.append(f"[{index}:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1[v{index}]")
-    filters.append("".join(f"[v{index}]" for index in range(len(clips))) + f"concat=n={len(clips)}:v=1:a=0,format=yuv420p[vout]")
+    filters = [f"color=c=black:s=1280x720:r=30:d={timeline_duration:.3f}[base]"]
+    last = "base"
+    for index, row in enumerate(clips):
+        start = max(0, int(row["timeline_start_ms"] or 0)) / 1000
+        duration = max(0.1, float(row["duration_ms"] or 1000) / 1000)
+        end = start + duration
+        filters.append(f"[{index}:v]scale=1280:720:force_original_aspect_ratio=decrease,pad=1280:720:(ow-iw)/2:(oh-ih)/2,setsar=1,trim=duration={duration:.3f},setpts=PTS-STARTPTS[v{index}]")
+        mix = f"mix{index}"
+        filters.append(f"[{last}][v{index}]overlay=x=0:y=0:eof_action=pass:repeatlast=0:enable='between(t,{start:.3f},{end:.3f})'[{mix}]")
+        last = mix
+    filters.append(f"[{last}]format=yuv420p[vout]")
     command.extend(["-filter_complex", ";".join(filters), "-map", "[vout]"])
     if audio_path:
-        command.extend(["-map", f"{audio_index}:a:0", "-shortest", "-c:a", "aac"])
-    command.extend(["-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(output_file)])
+        command.extend(["-map", f"{audio_index}:a:0", "-af", "apad", "-c:a", "aac"])
+    command.extend(["-t", f"{timeline_duration:.3f}", "-r", "30", "-c:v", "libx264", "-pix_fmt", "yuv420p", str(output_file)])
 
     with session() as connection:
         connection.execute("UPDATE render_jobs SET status = 'running', started_at = ? WHERE id = ?", (now_text(), job_id))
