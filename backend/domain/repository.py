@@ -908,7 +908,36 @@ def affected_shots(asset_id: str) -> list[str]:
 def list_models() -> list[dict[str, Any]]:
     with session() as connection:
         rows = connection.execute("SELECT * FROM model_definitions WHERE enabled = 1 ORDER BY type, provider, model_id").fetchall()
-        return [{"provider": row["provider"], "modelId": row["model_id"], "displayName": row["display_name"], "type": row["type"], "pricing": loads(row["pricing_json"], {}), "capabilities": loads(row["capabilities_json"], {})} for row in rows]
+        return [{"provider": row["provider"], "modelId": row["model_id"], "displayName": row["display_name"], "type": row["type"], "categories": loads(row["metadata_json"], {}).get("categories", [row["type"]]), "categoryLabels": loads(row["metadata_json"], {}).get("categoryLabels", []), "pricing": loads(row["pricing_json"], {}), "capabilities": loads(row["capabilities_json"], {})} for row in rows]
+
+
+def upsert_discovered_models(models: list[dict[str, Any]]) -> None:
+    """Persist model discovery results without storing credentials or raw responses."""
+    with session() as connection:
+        for model in models:
+            provider = str(model.get("provider") or "Discovered Provider")
+            model_id = str(model.get("modelId") or "").strip()
+            if not model_id:
+                continue
+            connection.execute(
+                """INSERT INTO model_definitions(provider, model_id, display_name, type, enabled, pricing_json, capabilities_json, metadata_json)
+                VALUES (?, ?, ?, ?, 1, ?, ?, ?)
+                ON CONFLICT(provider, model_id) DO UPDATE SET
+                  display_name = excluded.display_name,
+                  type = excluded.type,
+                  enabled = 1,
+                  capabilities_json = excluded.capabilities_json,
+                  metadata_json = excluded.metadata_json""",
+                (
+                    provider,
+                    model_id,
+                    str(model.get("displayName") or model_id),
+                    str(model.get("type") or "unknown"),
+                    dumps({}),
+                    dumps(model.get("capabilities") or {}),
+                    dumps({"categories": model.get("categories") or [], "categoryLabels": model.get("categoryLabels") or [], "source": "model-discovery"}),
+                ),
+            )
 
 
 def list_costs(project_id: str) -> dict[str, Any]:

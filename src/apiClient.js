@@ -114,6 +114,10 @@ export function testRemoteProviderSettings(payload = {}) {
   return request("/settings/providers/test", { method: "POST", body: JSON.stringify(payload) });
 }
 
+export function discoverRemoteModels(payload = {}) {
+  return request("/settings/providers/discover-models", { method: "POST", body: JSON.stringify(payload) });
+}
+
 export function startRemoteAgentRun(payload) {
   return request("/agent/runs", { method: "POST", body: JSON.stringify(payload) }).then((response) => response.run);
 }

@@ -23,6 +23,7 @@ GET       /api/projects/{project_id}/costs|qc
 POST      /api/projects/{project_id}/export
 GET/PATCH  /api/settings/providers
 POST       /api/settings/providers/test
+POST       /api/settings/providers/discover-models
 GET        /api/session
 GET        /api/audit-events
 
@@ -153,6 +154,14 @@ SHORT_DRAMA_RUNNINGHUB_API_KEY=
 ```
 
 RunningHub 的公开 API 采用“提交任务返回 `taskId`、再查询状态和结果”的异步模式；完整工作流通常还需要把节点输入整理成 `nodeInfoList`，文件输入先通过上传接口转成 provider 文件名。实现依据官方公开文档：[API 概览](https://www.runninghub.cn/runninghub-api-doc-cn/)、[工作流完整接入示例](https://www.runninghub.cn/runninghub-api-doc-cn/doc-8287342)、[文件上传接口](https://rhtv.runninghub.cn/runninghub-api-doc-cn/api-425749007)、[V2 任务查询](https://www.runninghub.cn/runninghub-api-doc-cn/api-425767306)。
+
+模型发现接口：
+
+```text
+POST /api/settings/providers/discover-models
+```
+
+请求体支持 `kind: video|llm`、`url`、`apiKey` 和 `providerName`。服务端会优先访问 `{url}/models`，再尝试 `{url}/v1/models`，兼容 OpenAI-compatible 的 `data`、`models`、`items` 和数组响应。返回结果包含 `models`、按 `text`、`vision`、`image`、`video`、`audio`、`embedding` 分类的 `groups`，以及推荐默认模型 `recommended`；发现结果会写入 `model_definitions`，API Key 和原始响应不会入库。RunningHub 不走通用模型列表，而是提示使用工作流 ID。
 
 环境变量：
 

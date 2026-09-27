@@ -81,6 +81,7 @@ import {
   deleteRemoteRunningHubWorkflow,
   runRemoteRunningHubWorkflow,
   uploadRemoteRunningHubFile,
+  discoverRemoteModels,
 } from "./apiClient.js";
 import {
   addShot,
@@ -511,6 +512,10 @@ export function App() {
     testProviderSettings: (payload = {}) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return testRemoteProviderSettings(payload);
+    },
+    discoverModels: (payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return discoverRemoteModels(payload);
     },
     getCanvas: () => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));

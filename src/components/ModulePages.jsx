@@ -533,10 +533,17 @@ const LOCAL_LLM_PRESETS = [
   { id: "minimax-vl", label: "MiniMax VL · 本地视觉模型", name: "MiniMax VL · vLLM", url: "http://127.0.0.1:8001/v1", model: "MiniMaxAI/MiniMax-VL-01", note: "用于视觉 QC；需本地服务支持图像输入" },
 ];
 
+function ModelDiscoveryResult({ catalog }) {
+  if (!catalog) return null;
+  return <div className="model-discovery-result"><div className="model-discovery-summary"><strong>已发现 {catalog.count} 个模型</strong><span>{catalog.endpoint}</span></div><div className="model-discovery-groups">{(catalog.groups || []).map((group) => <div className="model-discovery-group" key={group.type}><div><b>{group.label}</b><small>{group.count}</small></div><p>{group.models.map((model) => <span key={model.modelId} title={model.modelId}>{model.displayName}</span>)}</p></div>)}</div></div>;
+}
+
 function SettingsPage({ project, onUpdateProject, backendStatus, providerInfo, actions }) {
   const [settings, setSettings] = useState({ providerUrl: "", providerName: "External Video API", providerModel: "video-default", providerApiKey: "", providerApiKeyMasked: "", apiKeySet: false, voiceProvider: "mock", voiceModel: "voice-default", cosyvoiceUrl: "", chatterboxUrl: "", gptSovitsUrl: "", llmProviderUrl: "", llmProviderName: "OpenAI Compatible", llmModel: "gpt-4o-mini", llmApiKey: "", llmApiKeyMasked: "", llmApiKeySet: false, secretStorage: null });
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsNotice, setSettingsNotice] = useState("");
+  const [modelCatalogs, setModelCatalogs] = useState({ media: null, llm: null });
+  const [discovering, setDiscovering] = useState("");
   const providerLabel = providerInfo?.mode === "remote" ? `外部接口 · ${providerInfo.provider}` : providerInfo?.mode === "demo" ? "本地演示生成器" : "未连接";
   useEffect(() => {
     if (backendStatus !== "online") return;
@@ -553,13 +560,43 @@ function SettingsPage({ project, onUpdateProject, backendStatus, providerInfo, a
     setSettings((current) => ({ ...current, llmPreset: preset.id, llmProviderUrl: preset.url, llmProviderName: preset.name, llmModel: preset.model }));
     setSettingsNotice(`${preset.label} 已填入。${preset.note}；请确认本地服务端口后保存。`);
   };
+  const discoveryPayload = (kind, values = settings) => kind === "llm"
+    ? { kind: "llm", url: values.llmProviderUrl, apiKey: values.llmApiKey, providerName: values.llmProviderName }
+    : { kind: "video", url: values.providerUrl, apiKey: values.providerApiKey, providerName: values.providerName };
+  const discoverModels = async (kind, values = settings) => {
+    const payload = discoveryPayload(kind, values);
+    if (!payload.url) {
+      setSettingsNotice("请先填写 API 地址");
+      return null;
+    }
+    setDiscovering(kind);
+    try {
+      const result = await actions.discoverModels(payload);
+      setModelCatalogs((current) => ({ ...current, [kind === "llm" ? "llm" : "media"]: result }));
+      const recommended = result.recommended || {};
+      setSettings((current) => ({ ...current, ...(kind === "llm" && !current.llmModel ? { llmModel: recommended.text || recommended.vision || "" } : {}), ...(kind !== "llm" && !current.providerModel ? { providerModel: recommended.image || recommended.video || "" } : {}) }));
+      setSettingsNotice(`已读取 ${result.count} 个模型，并自动分为 ${result.groups.map((group) => group.label).join("、")}。`);
+      return result;
+    } catch (error) {
+      setSettingsNotice(error?.message || "模型列表读取失败；请确认接口支持 /models");
+      return null;
+    } finally {
+      setDiscovering("");
+    }
+  };
   const saveSettings = async () => {
     setSettingsBusy(true);
     setSettingsNotice("");
     try {
       const next = await actions.saveProviderSettings(settings);
       setSettings({ ...next, llmPreset: settings.llmPreset });
-      setSettingsNotice("API 配置已保存，新的图片、视频和音频任务会立即使用。");
+      window.dispatchEvent(new Event("short-drama-settings-saved"));
+      setSettingsNotice("API 配置已保存，正在读取模型列表…");
+      const discoveries = await Promise.all([
+        next.providerUrl ? discoverModels("media", { ...settings, ...next }) : null,
+        next.llmProviderUrl ? discoverModels("llm", { ...settings, ...next }) : null,
+      ]);
+      if (!discoveries.some(Boolean)) setSettingsNotice("API 配置已保存；接口未返回标准模型列表，可继续手动填写模型名。");
     } catch (error) {
       setSettingsNotice(error?.message || "API 配置保存失败");
     } finally {
@@ -581,6 +618,52 @@ function SettingsPage({ project, onUpdateProject, backendStatus, providerInfo, a
   return <div className="module-page settings-page"><PageHeader eyebrow="Settings" title="项目设置" description="项目资料和生成 API 都在这里配置，保存后后台任务会立即切换。" /><section className="module-section settings-form"><label>项目名称<input value={project.title} onChange={(event) => onUpdateProject({ title: event.target.value })} /></label><label>项目状态<select value={project.status} onChange={(event) => onUpdateProject({ status: event.target.value })}>{["策划中", "制作中", "审核中", "已完成"].map((item) => <option key={item}>{item}</option>)}</select></label><label>预算（元）<input type="number" min="0" value={project.budget} onChange={(event) => onUpdateProject({ budget: Number(event.target.value) })} /></label><label>计划完成日期<input type="date" value={project.dueDate} onChange={(event) => onUpdateProject({ dueDate: event.target.value })} /></label></section><section className="module-section settings-api-card"><div className="settings-api-heading"><div><span className="section-kicker">Provider Settings</span><h2>统一生成 API 配置</h2><p>图片、视频、声音和 LLM 都从这里配置。API Key 仅保存在本机后台，页面只显示掩码。</p></div><span className={`status-pill ${backendStatus === "online" ? "success" : "muted"}`}>{providerLabel}</span></div><div className="settings-api-form"><label className="settings-api-wide">通用图片/视频 API 地址<span>POST JSON 接口，例如你的统一生成网关</span><input value={settings.providerUrl || ""} onChange={(event) => update("providerUrl", event.target.value)} placeholder="https://your-provider.example.com/v1/generate" /></label><label>Provider 名称<input value={settings.providerName || ""} onChange={(event) => update("providerName", event.target.value)} placeholder="External Video API" /></label><label>默认模型<input value={settings.providerModel || ""} onChange={(event) => update("providerModel", event.target.value)} placeholder="video-default" /></label><label className="settings-api-wide">API Key<input type="password" value={settings.providerApiKey || ""} onChange={(event) => update("providerApiKey", event.target.value)} placeholder={settings.apiKeySet ? "已保存密钥，留空保持不变" : "sk-..."} autoComplete="off" /></label><div className="settings-api-wide settings-api-actions"><button type="button" onClick={() => testSettings("video")} disabled={settingsBusy || !settings.providerUrl}>测试通用接口</button></div><label className="settings-api-wide">MiniMax / LLM 快速预设<select value={settings.llmPreset || "custom"} onChange={(event) => applyLLMPreset(event.target.value)}><option value="custom">自定义 OpenAI-compatible</option>{LOCAL_LLM_PRESETS.map((preset) => <option value={preset.id} key={preset.id}>{preset.label}</option>)}</select><span>本地 vLLM 默认使用 8001，避免和 Short Drama OS 的 FastAPI 8000 端口冲突。</span></label><label className="settings-api-wide">LLM / Agent API 地址<span>填写 vLLM 的基础地址，适配器会自动请求 /chat/completions</span><input value={settings.llmProviderUrl || ""} onChange={(event) => update("llmProviderUrl", event.target.value)} placeholder="http://127.0.0.1:8001/v1" /></label><label>LLM Provider 名称<input value={settings.llmProviderName || ""} onChange={(event) => update("llmProviderName", event.target.value)} placeholder="MiniMax Local · vLLM" /></label><label>LLM 模型<input value={settings.llmModel || ""} onChange={(event) => update("llmModel", event.target.value)} placeholder="MiniMaxAI/MiniMax-M2.1" /></label><label className="settings-api-wide">LLM API Key<input type="password" value={settings.llmApiKey || ""} onChange={(event) => update("llmApiKey", event.target.value)} placeholder={settings.llmApiKeySet ? "已保存密钥，留空保持不变" : "本地通常留空"} autoComplete="off" /></label><div className="settings-api-wide settings-api-actions"><button type="button" onClick={() => testSettings("llm")} disabled={settingsBusy || !settings.llmProviderUrl}>测试 MiniMax / LLM</button></div><label>声音 Provider<select value={settings.voiceProvider || "mock"} onChange={(event) => update("voiceProvider", event.target.value)}>{[["mock", "本地 WAV Demo"], ["cosyvoice", "CosyVoice HTTP"], ["chatterbox", "Chatterbox HTTP"], ["gpt-sovits", "GPT-SoVITS HTTP"]].map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>声音模型<input value={settings.voiceModel || ""} onChange={(event) => update("voiceModel", event.target.value)} placeholder="voice-default" /></label><label>CosyVoice 地址<input value={settings.cosyvoiceUrl || ""} onChange={(event) => update("cosyvoiceUrl", event.target.value)} placeholder="http://127.0.0.1:50000/..." /></label><label>Chatterbox 地址<input value={settings.chatterboxUrl || ""} onChange={(event) => update("chatterboxUrl", event.target.value)} placeholder="http://127.0.0.1:8001/tts" /></label><label>GPT-SoVITS 地址<input value={settings.gptSovitsUrl || ""} onChange={(event) => update("gptSovitsUrl", event.target.value)} placeholder="http://127.0.0.1:9880/tts" /></label><div className="settings-api-actions settings-api-wide"><button type="button" onClick={() => testSettings("audio")} disabled={settingsBusy || settings.voiceProvider === "mock"}>测试声音接口</button><button className="primary-action" type="button" onClick={saveSettings} disabled={settingsBusy || backendStatus !== "online"}>{settingsBusy ? "保存中…" : "保存 API 配置"}</button></div></div>{settingsNotice && <div className="settings-api-notice">{settingsNotice}</div>}<small className="settings-api-footnote">连接测试会访问 LLM 的 /models 路径；MiniMax M2 系列适合 Agent，MiniMax VL 系列才适合视觉输入。未配置视觉模型时，系统仍会执行本地像素和连续性检查。</small></section><section className="module-section api-status-card"><div><span className="section-kicker">API Runtime</span><h3>任务运行状态</h3><p>{backendStatus === "online" ? (providerInfo?.mode === "remote" ? "已配置外部生成平台，新的任务会写入持久队列并由后台执行。" : "当前使用本地演示 Provider；保存外部地址后会自动切换。") : "FastAPI 未连接，生成任务无法同步到服务端。"}</p></div><span className={`status-pill ${backendStatus === "online" ? "success" : "muted"}`}>{providerLabel}</span></section></div>;
 }
 
+function ModelDiscoveryPanel({ actions, backendStatus }) {
+  const [settings, setSettings] = useState(null);
+  const [catalogs, setCatalogs] = useState({ media: null, llm: null });
+  const [busy, setBusy] = useState("");
+  const [notice, setNotice] = useState("");
+  useEffect(() => {
+    if (backendStatus !== "online") return;
+    actions.getProviderSettings().then((next) => {
+      setSettings(next);
+      const requests = [];
+      if (next.providerUrl) requests.push(actions.discoverModels({ kind: "video", url: next.providerUrl, apiKey: next.providerApiKey, providerName: next.providerName }).then((result) => setCatalogs((current) => ({ ...current, media: result }))));
+      if (next.llmProviderUrl) requests.push(actions.discoverModels({ kind: "llm", url: next.llmProviderUrl, apiKey: next.llmApiKey, providerName: next.llmProviderName }).then((result) => setCatalogs((current) => ({ ...current, llm: result }))));
+      return Promise.allSettled(requests);
+    }).catch(() => setNotice("模型目录读取失败，请检查 API 地址和 /models 接口。"));
+  }, [backendStatus]);
+  useEffect(() => {
+    const handleSaved = () => {
+      actions.getProviderSettings().then((next) => {
+        setSettings(next);
+        const requests = [];
+        if (next.providerUrl) requests.push(actions.discoverModels({ kind: "video", url: next.providerUrl, apiKey: next.providerApiKey, providerName: next.providerName }).then((result) => setCatalogs((current) => ({ ...current, media: result }))));
+        if (next.llmProviderUrl) requests.push(actions.discoverModels({ kind: "llm", url: next.llmProviderUrl, apiKey: next.llmApiKey, providerName: next.llmProviderName }).then((result) => setCatalogs((current) => ({ ...current, llm: result }))));
+        return Promise.allSettled(requests);
+      }).catch(() => setNotice("模型目录读取失败，请检查 API 地址和 /models 接口。"));
+    };
+    window.addEventListener("short-drama-settings-saved", handleSaved);
+    return () => window.removeEventListener("short-drama-settings-saved", handleSaved);
+  }, [backendStatus]);
+  const refresh = async (kind) => {
+    if (!settings) return;
+    const payload = kind === "llm" ? { kind, url: settings.llmProviderUrl, apiKey: settings.llmApiKey, providerName: settings.llmProviderName } : { kind: "video", url: settings.providerUrl, apiKey: settings.providerApiKey, providerName: settings.providerName };
+    if (!payload.url) { setNotice("请先在上方填写并保存 API 地址。"); return; }
+    setBusy(kind);
+    try {
+      const result = await actions.discoverModels(payload);
+      setCatalogs((current) => ({ ...current, [kind === "llm" ? "llm" : "media"]: result }));
+      setNotice(`${result.provider} 已发现 ${result.count} 个模型，并完成自动分类。`);
+    } catch (error) {
+      setNotice(error?.message || "模型目录读取失败");
+    } finally {
+      setBusy("");
+    }
+  };
+  return <section className="module-section model-discovery-card"><div className="model-discovery-heading"><div><span className="section-kicker">MODEL DISCOVERY</span><h2>自动模型目录</h2><p>保存 API 后自动读取 /models，并按文本、视觉、图片、视频、音频和向量模型分类。</p></div><span className="status-pill success">已接入</span></div><div className="model-discovery-columns"><div><div className="model-discovery-toolbar"><strong>图片 / 视频 Provider</strong><button type="button" onClick={() => refresh("media")} disabled={busy === "media"}>{busy === "media" ? "读取中…" : "刷新模型"}</button></div><ModelDiscoveryResult catalog={catalogs.media} /></div><div><div className="model-discovery-toolbar"><strong>LLM / Agent Provider</strong><button type="button" onClick={() => refresh("llm")} disabled={busy === "llm"}>{busy === "llm" ? "读取中…" : "刷新模型"}</button></div><ModelDiscoveryResult catalog={catalogs.llm} /></div></div>{notice && <div className="settings-api-notice">{notice}</div>}</section>;
+}
+
 export function ModulePage({ activeNav, project, stats, actions }) {
   if (activeNav === "Agent") return <AgentPage project={project} stats={stats} actions={actions} />;
   if (activeNav === "概览") return <OverviewPage project={project} stats={stats} onNavigate={actions.navigate} />;
@@ -593,7 +676,7 @@ export function ModulePage({ activeNav, project, stats, actions }) {
   if (activeNav === "时间线") return <TimelinePage project={project} actions={actions} />;
   if (activeNav === "质检") return <QCPage project={project} actions={actions} onReviewShot={actions.reviewShot} onRegenerate={actions.regenerateShot} />;
   if (activeNav === "导出") return <ExportPage project={project} onExport={actions.exportProject} />;
-  return <SettingsPage project={project} onUpdateProject={actions.updateProject} backendStatus={actions.backendStatus} providerInfo={actions.providerInfo} actions={actions} />;
+  return <><SettingsPage project={project} onUpdateProject={actions.updateProject} backendStatus={actions.backendStatus} providerInfo={actions.providerInfo} actions={actions} /><ModelDiscoveryPanel actions={actions} backendStatus={actions.backendStatus} /></>;
 }
 
 export function SearchDialog({ open, project, onClose, onOpenResult }) {

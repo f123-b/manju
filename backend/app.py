@@ -107,6 +107,7 @@ from .services.asset_generation_service import generate_asset_image
 from .services.script_service import generate_episode_matrix, generate_scene_script, generate_shot_breakdown
 from .services.task_engine import task_engine
 from .services.runtime_settings import _raw_settings, public_provider_settings, save_provider_settings, test_provider_connection
+from .services.model_discovery import ModelDiscoveryError, discover_models
 from .services.agent_service import cancel_agent_run, create_agent_run, get_agent_run, list_agent_runs, resume_agent_run
 from .services.qc_service import run_project_continuity_check, run_project_qc, run_shot_visual_qc
 from .services.render_service import list_render_jobs, render_episode_mp4
@@ -192,6 +193,29 @@ async def post_provider_settings_test(payload: Optional[dict[str, Any]] = Body(d
             continue
         settings[key] = value
     return await asyncio.to_thread(test_provider_connection, settings)
+
+
+@app.post("/api/settings/providers/discover-models")
+async def post_provider_model_discovery(payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    requested = payload or {}
+    kind = str(requested.get("kind") or "llm").lower()
+    settings = _raw_settings()
+    if kind in {"llm", "agent", "vision"}:
+        url = requested.get("url") or requested.get("llmProviderUrl") or settings.get("llmProviderUrl")
+        api_key = requested.get("apiKey") or requested.get("llmApiKey") or settings.get("llmApiKey")
+        provider_name = requested.get("providerName") or requested.get("llmProviderName") or settings.get("llmProviderName")
+    else:
+        url = requested.get("url") or requested.get("providerUrl") or settings.get("providerUrl")
+        api_key = requested.get("apiKey") or requested.get("providerApiKey") or settings.get("providerApiKey")
+        provider_name = requested.get("providerName") or settings.get("providerName")
+    if kind == "runninghub":
+        return {"provider": "RunningHub", "models": [], "groups": [{"type": "workflow", "label": "工作流", "count": 0, "models": []}], "count": 0, "warning": "RunningHub 以 workflowId 管理工作流，不提供通用模型列表。"}
+    try:
+        result = await asyncio.to_thread(discover_models, str(url or ""), api_key, provider_name, kind)
+        record_audit("models.discovered", "model_definitions", metadata={"provider": result["provider"], "count": result["count"], "kind": kind})
+        return result
+    except ModelDiscoveryError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @app.post("/api/agent/runs")
