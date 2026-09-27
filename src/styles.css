@@ -863,11 +863,16 @@ button { color: inherit; }
 .canvas-surface-tools i { width: 1px; height: 16px; margin: 0 2px; background: #e1e7ee; }
 .canvas-scene { position: absolute; top: 0; left: 0; width: 1800px; height: 1200px; transform-origin: 0 0; }
 .canvas-edges { position: absolute; inset: 0; overflow: visible; pointer-events: none; }
-.canvas-edge-path { fill: none; stroke: url(#canvas-edge-gradient); stroke-width: 2.2; stroke-linecap: round; opacity: .72; }
+.canvas-edge-path { fill: none; stroke: url(#canvas-edge-gradient); stroke-width: 2.2; stroke-linecap: round; opacity: .72; pointer-events: stroke; cursor: pointer; transition: stroke-width .16s ease, opacity .16s ease; }
+.canvas-edge-path:hover, .canvas-edge-path.is-selected { stroke: #347fe2; stroke-width: 3.5; opacity: 1; }
 .canvas-node { position: absolute; z-index: 2; overflow: visible; border: 1px solid #d8e0e9; border-top: 3px solid var(--node-tone); border-radius: 8px; background: #fff; box-shadow: 0 7px 20px rgb(40 61 88 / 8%); user-select: none; }
 .canvas-node:hover { box-shadow: 0 10px 25px rgb(40 61 88 / 14%); }
 .canvas-node.is-selected { border-color: #6ca2e9; box-shadow: 0 0 0 2px rgb(94 148 227 / 20%), 0 10px 25px rgb(40 61 88 / 13%); }
 .canvas-node.is-connecting { box-shadow: 0 0 0 2px rgb(77 129 236 / 42%), 0 10px 25px rgb(40 61 88 / 13%); }
+.canvas-surface.is-linking .canvas-node.is-link-mode { cursor: crosshair; }
+.canvas-surface.is-linking .canvas-node.is-link-mode .canvas-node-header { cursor: crosshair; }
+.canvas-surface.is-linking .canvas-node.is-link-mode:not(.is-connecting) { border-color: #b8cfee; box-shadow: 0 0 0 1px rgb(94 148 227 / 18%), 0 8px 22px rgb(40 61 88 / 10%); }
+.canvas-surface.is-linking .canvas-node.is-link-target { border-color: #4d91e7; box-shadow: 0 0 0 2px rgb(77 145 231 / 24%), 0 10px 25px rgb(40 61 88 / 13%); }
 .canvas-node-header { height: 38px; display: flex; align-items: center; gap: 7px; padding: 0 10px; border-bottom: 1px solid #edf0f4; cursor: grab; }
 .canvas-node-header:active { cursor: grabbing; }
 .canvas-node-icon { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 5px; color: var(--node-tone); background: var(--node-soft); font-size: 11px; font-weight: 700; }
@@ -888,9 +893,19 @@ button { color: inherit; }
 .canvas-node-footer button:hover { background: #e8f1ff; }
 .canvas-port { position: absolute; z-index: 4; width: 9px; height: 9px; padding: 0; border: 2px solid #fff; border-radius: 50%; background: #8ca5c1; box-shadow: 0 0 0 1px #aab9ca; cursor: crosshair; }
 .canvas-port:hover { width: 12px; height: 12px; background: #2e7fe2; }
+.canvas-surface.is-linking .canvas-port { width: 12px; height: 12px; background: #4d91e7; box-shadow: 0 0 0 2px rgb(77 145 231 / 18%); }
+.canvas-surface.is-linking .canvas-port.input { animation: canvas-port-pulse 1.25s ease-in-out infinite; }
 .canvas-port.input { top: 50%; left: -6px; transform: translateY(-50%); }
 .canvas-port.output { top: 50%; right: -6px; transform: translateY(-50%); }
 .canvas-linking-hint { position: absolute; z-index: 10; right: 16px; bottom: 16px; display: flex; align-items: center; gap: 6px; padding: 8px 10px; border: 1px solid #c8dbf5; border-radius: 5px; color: #3978c6; background: rgb(244 249 255 / 95%); font-size: 10px; }
+.canvas-edge-summary { display: flex; align-items: center; gap: 8px; margin-top: 18px; padding: 11px 10px; border: 1px solid #e2e9f2; border-radius: 6px; color: #52647a; background: #f7faff; font-size: 10px; }
+.canvas-edge-summary strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.canvas-edge-summary svg { flex: 0 0 auto; color: #4a8de1; }
+.canvas-edge-copy { margin: 12px 0 0; color: #8b97a6; font-size: 10px; line-height: 1.7; }
+.canvas-edge-label { display: grid; gap: 5px; margin-top: 17px; padding-top: 13px; border-top: 1px solid #e9edf2; }
+.canvas-edge-label span { color: #8995a4; font-size: 9px; }
+.canvas-edge-label strong { color: #53647a; font-size: 10px; font-weight: 500; line-height: 1.5; }
+@keyframes canvas-port-pulse { 0%, 100% { box-shadow: 0 0 0 2px rgb(77 145 231 / 14%); } 50% { box-shadow: 0 0 0 5px rgb(77 145 231 / 7%); } }
 .canvas-empty { position: absolute; top: 50%; left: 50%; display: grid; justify-items: center; gap: 9px; transform: translate(-50%, -50%); color: #8190a2; text-align: center; }
 .canvas-empty > svg { color: #6b9fe6; }
 .canvas-empty strong { color: #52647b; font-size: 15px; }
