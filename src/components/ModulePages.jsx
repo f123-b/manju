@@ -18,6 +18,7 @@ import {
   Warning,
   X,
 } from "@phosphor-icons/react";
+import { ModelSettingsPage } from "./ModelSettingsPage.jsx";
 
 function PageHeader({ eyebrow, title, description, action }) {
   return <div className="module-header"><div><span>{eyebrow}</span><h1>{title}</h1><p>{description}</p></div>{action}</div>;
@@ -694,7 +695,7 @@ export function ModulePage({ activeNav, project, stats, actions }) {
   if (activeNav === "时间线") return <TimelinePage project={project} actions={actions} />;
   if (activeNav === "质检") return <QCPage project={project} actions={actions} onReviewShot={actions.reviewShot} onRegenerate={actions.regenerateShot} />;
   if (activeNav === "导出") return <ExportPage project={project} onExport={actions.exportProject} />;
-  return <><SettingsPage project={project} onUpdateProject={actions.updateProject} backendStatus={actions.backendStatus} providerInfo={actions.providerInfo} actions={actions} /><ModelDiscoveryPanel actions={actions} backendStatus={actions.backendStatus} /><ProviderAsyncSettings actions={actions} backendStatus={actions.backendStatus} /></>;
+  return <ModelSettingsPage project={project} onUpdateProject={actions.updateProject} backendStatus={actions.backendStatus} providerInfo={actions.providerInfo} actions={actions} />;
 }
 
 export function SearchDialog({ open, project, onClose, onOpenResult }) {

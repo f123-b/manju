@@ -74,7 +74,7 @@ test("provider settings persist safely and test a configured endpoint", async (t
   const saveResponse = await fetch(`${base}/api/settings/providers`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ providerName: "Test Gateway", providerModel: "test-model", providerApiKey: "secret-value", voiceProvider: "mock" }),
+    body: JSON.stringify({ providerName: "Test Gateway", providerModel: "test-model", providerApiKey: "secret-value", llmVisionModel: "MiniMaxAI/MiniMax-VL-01", voiceProvider: "mock" }),
   });
   const saved = await saveResponse.json();
   assert.equal(saveResponse.ok, true);
@@ -82,6 +82,7 @@ test("provider settings persist safely and test a configured endpoint", async (t
   assert.equal(saved.settings.providerApiKey, "");
   assert.equal(saved.settings.apiKeySet, true);
   assert.equal(saved.settings.providerApiKeyMasked, "••••••••");
+  assert.equal(saved.settings.llmVisionModel, "MiniMaxAI/MiniMax-VL-01");
   const rawSecret = execFileSync("python", ["-c", "import os, sqlite3; print(sqlite3.connect(os.environ['TEST_DB']).execute(\"SELECT value FROM runtime_settings WHERE key='providerApiKey'\").fetchone()[0])"], { env: { ...process.env, TEST_DB: path.join(tempDir, "settings.sqlite3") }, encoding: "utf8" }).trim();
   assert.doesNotMatch(rawSecret, /secret-value/);
   assert.match(rawSecret, /^(dpapi|file):v1:/);

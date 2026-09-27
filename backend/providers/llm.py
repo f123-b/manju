@@ -22,6 +22,7 @@ class LLMProvider:
         self.url = str(settings.get("llmProviderUrl") or "").rstrip("/")
         self.provider = settings.get("llmProviderName") or "OpenAI Compatible"
         self.model = settings.get("llmModel") or "gpt-4o-mini"
+        self.vision_model = settings.get("llmVisionModel") or self.model
         self.api_key = settings.get("llmApiKey") or ""
 
     @property
@@ -33,14 +34,14 @@ class LLMProvider:
             return self.url
         return f"{self.url}/chat/completions"
 
-    def _request_messages(self, messages: list[dict[str, Any]]) -> dict[str, Any]:
+    def _request_messages(self, messages: list[dict[str, Any]], model: str | None = None) -> dict[str, Any]:
         if not self.configured:
             raise LLMNotConfigured("请先在设置中填写 LLM Provider 地址")
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
         if self.api_key:
             headers["Authorization"] = f"Bearer {self.api_key}"
         body = {
-            "model": self.model,
+            "model": model or self.model,
             "temperature": 0.2,
             "messages": messages,
             "response_format": {"type": "json_object"},
@@ -124,7 +125,7 @@ class LLMProvider:
                 ],
             },
         ]
-        return self._request_messages(messages)
+        return self._request_messages(messages, self.vision_model)
 
     async def complete_json(self, system: str, user: str) -> dict[str, Any]:
         return await asyncio.to_thread(self._request, system, user)

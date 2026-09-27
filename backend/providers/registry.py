@@ -26,6 +26,7 @@ class ProviderRegistry:
             "llmProviderUrl": os.environ.get("SHORT_DRAMA_LLM_PROVIDER_URL", ""),
             "llmProviderName": os.environ.get("SHORT_DRAMA_LLM_PROVIDER_NAME", "OpenAI Compatible"),
             "llmModel": os.environ.get("SHORT_DRAMA_LLM_MODEL", "gpt-4o-mini"),
+            "llmVisionModel": os.environ.get("SHORT_DRAMA_LLM_VISION_MODEL", ""),
             "runninghubBaseUrl": os.environ.get("SHORT_DRAMA_RUNNINGHUB_BASE_URL", "https://www.runninghub.cn"),
             "runninghubApiKey": os.environ.get("SHORT_DRAMA_RUNNINGHUB_API_KEY", ""),
         })
