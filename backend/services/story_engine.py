@@ -267,7 +267,7 @@ def develop_project_story(project_id: str, payload: dict[str, Any] | None = None
         "sourceText": source_text,
         "preferences": payload.get("preferences") or [],
     }
-    data = _llm_json(
+    generated = _llm_json(
         """你是短剧总编剧兼制片。把用户素材开发成结构化短剧生产圣经。只返回 JSON。
 字段：storyBible{logline,coreConflict,mainLine,theme,thematicQuestion,genre,tone,audience,platform,world,style,ending,structureType,majorTurns[],rules[],characterMap{}},
 characters[{name,role,tier,want,need,flaw,arc,speechStyle,appearance,personality,secrets[],relationships[]}],
@@ -277,6 +277,7 @@ episodes[{order,title,synopsis,hook,coreEvent,payoff,twist,endingHook,beats:[{ty
 短剧要求：每集有开场钩子、兑现/爽点和结尾问题；人物数量克制；场景优先可复用；不要把对白写进分集梗概。""",
         context,
     )
+    data = generated
     if not data:
         data = {
             "storyBible": {**project["storyBible"], "genre": payload.get("genre", ""), "tone": payload.get("tone", ""), "thematicQuestion": payload.get("thematicQuestion", "")},
@@ -306,7 +307,7 @@ episodes[{order,title,synopsis,hook,coreEvent,payoff,twist,endingHook,beats:[{ty
                 _upsert_prop(connection, project_id, item)
     _persist_episode_plan(project_id, [item for item in _json_list(data.get("episodes")) if isinstance(item, dict)])
     result = story_snapshot(project_id)
-    result["source"] = "llm" if source_text or data else "current-project"
+    result["source"] = "llm" if generated else "local-fallback"
     result["quality"] = validate_story_project(project_id)
     return result
 
