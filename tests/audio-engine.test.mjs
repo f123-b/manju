@@ -84,8 +84,16 @@ test("audio engine extracts lines, persists takes, runs QC and mixdown", async (
   assert.equal(activateResponse.ok, true);
   const clipResponse = await fetch(`${base}/api/projects/P001/audio-clips`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ takeId: take.id, episodeId: "EP08", sceneId: "SC03", trackType: "dialogue" }) });
   assert.equal(clipResponse.ok, true);
+  const clip = (await clipResponse.json()).clip;
+  const patchClipResponse = await fetch(`${base}/api/audio-clips/${clip.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ timelineStartMs: 1200, durationMs: 1800, gainDb: -2 }) });
+  const patchedClip = await patchClipResponse.json();
+  assert.equal(patchClipResponse.ok, true);
+  assert.equal(patchedClip.clip.timelineStartMs, 1200);
+  assert.equal(patchedClip.clip.gainDb, -2);
   const mixResponse = await fetch(`${base}/api/episodes/EP08/mixdown`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
   const mix = await mixResponse.json();
   assert.equal(mixResponse.ok, true);
   assert.match(mix.mixdown.outputUrl, /generated-media\/.*\.wav/);
+  const deleteClipResponse = await fetch(`${base}/api/audio-clips/${clip.id}`, { method: "DELETE" });
+  assert.equal(deleteClipResponse.ok, true);
 });

@@ -49,6 +49,34 @@ export function testRemoteProviderSettings(payload = {}) {
   return request("/settings/providers/test", { method: "POST", body: JSON.stringify(payload) });
 }
 
+export function startRemoteAgentRun(payload) {
+  return request("/agent/runs", { method: "POST", body: JSON.stringify(payload) }).then((response) => response.run);
+}
+
+export function getRemoteAgentRun(runId) {
+  return request(`/agent/runs/${runId}`).then((response) => response.run);
+}
+
+export function resumeRemoteAgentRun(runId) {
+  return request(`/agent/runs/${runId}/resume`, { method: "POST" }).then((response) => response.run);
+}
+
+export function cancelRemoteAgentRun(runId) {
+  return request(`/agent/runs/${runId}/cancel`, { method: "POST" }).then((response) => response.run);
+}
+
+export function runRemoteShotQC(shotId) {
+  return request(`/shots/${shotId}/qc`, { method: "POST" }).then((response) => response.result);
+}
+
+export function runRemoteProjectQC() {
+  return request("/projects/P001/qc", { method: "POST" }).then((response) => response.result);
+}
+
+export function runRemoteContinuityCheck() {
+  return request("/projects/P001/continuity-check", { method: "POST" }).then((response) => response.result);
+}
+
 export function patchRemoteProject(patch) {
   return request("/projects/P001", { method: "PATCH", body: JSON.stringify(patch) });
 }
@@ -255,6 +283,18 @@ export function createRemoteAudioClip(payload) {
   return request("/projects/P001/audio-clips", { method: "POST", body: JSON.stringify(payload) }).then((response) => response.clip);
 }
 
+export function patchRemoteAudioClip(clipId, payload) {
+  return request(`/audio-clips/${clipId}`, { method: "PATCH", body: JSON.stringify(payload) }).then((response) => response.clip);
+}
+
+export function deleteRemoteAudioClip(clipId) {
+  return request(`/audio-clips/${clipId}`, { method: "DELETE" });
+}
+
 export function mixdownRemoteEpisode(episodeId) {
   return request(`/episodes/${episodeId}/mixdown`, { method: "POST", body: JSON.stringify({}) }).then((response) => response.mixdown);
+}
+
+export function renderRemoteEpisode(episodeId, payload = {}) {
+  return request(`/episodes/${episodeId}/render`, { method: "POST", body: JSON.stringify(payload) }).then((response) => response.render);
 }

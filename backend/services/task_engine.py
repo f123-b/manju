@@ -77,6 +77,16 @@ class TaskEngine:
 
     async def _process(self, task: dict[str, Any]) -> None:
         task_id = task["id"]
+        if task.get("target_type") == "agent_run":
+            from .agent_service import run_agent_task
+
+            await run_agent_task(task)
+            return
+        if task.get("target_type") == "asset":
+            from .asset_generation_service import run_asset_task
+
+            await run_asset_task(task, self.registry)
+            return
         kind = KIND_BY_TASK_TYPE.get(task.get("type", "视频"), "video")
         provider = self.registry.resolve(kind, task.get("provider"), task.get("model"))
         payload = {

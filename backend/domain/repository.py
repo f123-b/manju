@@ -530,6 +530,16 @@ def complete_generation_task(task_id: str, result: dict[str, Any]) -> str:
         task = connection.execute("SELECT * FROM generation_tasks WHERE id = ?", (task_id,)).fetchone()
         if not task:
             raise KeyError(f"task {task_id} not found")
+        if task["target_type"] == "asset":
+            output_url = result.get("output_url") or result.get("image_url") or result.get("url") or "/assets/shot-wide.png"
+            asset_type = loads(task["parameters_json"], {}).get("assetType")
+            table = asset_type if asset_type in {"characters", "locations", "props"} else "locations"
+            connection.execute(f"UPDATE {table} SET image = ?, status = '已生成', updated_at = ? WHERE id = ?", (output_url, now_text(), task["target_id"]))
+            actual_cost = round(float(result.get("cost") or task["estimated_cost"] or 0), 2)
+            connection.execute("UPDATE generation_tasks SET status = 'Success', progress = 100, actual_cost = ?, completed_at = ?, updated_at = ? WHERE id = ?", (actual_cost, now_text(), now_text(), task_id))
+            connection.execute("UPDATE projects SET spent = spent + ?, updated_at = ? WHERE id = ?", (actual_cost, now_text(), task["project_id"]))
+            connection.execute("INSERT INTO cost_records(id, project_id, task_id, provider, model, category, estimated_cost, actual_cost, status) VALUES (?, ?, ?, ?, ?, 'image', ?, ?, 'actual')", (new_id("COST-"), task["project_id"], task_id, task["provider"], task["model"], task["estimated_cost"], actual_cost))
+            return task["project_id"]
         if task["target_type"] == "voice_take":
             output_url = result.get("output_url") or result.get("audio_url") or result.get("url")
             media_asset_id = None
@@ -591,9 +601,16 @@ def fail_generation_task(task_id: str, error_message: str) -> str:
         if not task:
             raise KeyError(f"task {task_id} not found")
         connection.execute("UPDATE generation_tasks SET status = 'Failed', progress = 0, error_message = ?, completed_at = ?, updated_at = ? WHERE id = ?", (error_message, now_text(), now_text(), task_id))
+        if task["target_type"] == "agent_run":
+            connection.execute("UPDATE agent_runs SET status = 'failed', error_message = ?, updated_at = ? WHERE id = ?", (error_message, now_text(), task["target_id"]))
         if task["shot_id"]:
             connection.execute("UPDATE shots SET status = '待生成', updated_at = ? WHERE id = ? AND status = '生成中'", (now_text(), task["shot_id"]))
-        connection.execute("INSERT INTO cost_records(id, project_id, shot_id, task_id, provider, model, category, estimated_cost, actual_cost, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'failed')", (new_id("COST-"), task["project_id"], task["shot_id"], task_id, task["provider"], task["model"], "failed" if task["target_type"] == "shot" else "character_reference", task["estimated_cost"]))
+        if task["target_type"] == "asset":
+            asset_type = loads(task["parameters_json"], {}).get("assetType")
+            table = asset_type if asset_type in {"characters", "locations", "props"} else "locations"
+            connection.execute(f"UPDATE {table} SET status = '生成失败', updated_at = ? WHERE id = ?", (now_text(), task["target_id"]))
+        category = "video" if task["target_type"] == "shot" else "image" if task["target_type"] == "asset" else "character_reference"
+        connection.execute("INSERT INTO cost_records(id, project_id, shot_id, task_id, provider, model, category, estimated_cost, actual_cost, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'failed')", (new_id("COST-"), task["project_id"], task["shot_id"], task_id, task["provider"], task["model"], category, task["estimated_cost"]))
         return task["project_id"]
 
 
@@ -605,6 +622,10 @@ def cancel_generation_task(task_id: str) -> str:
         connection.execute("UPDATE generation_tasks SET status = 'Cancelled', completed_at = ?, updated_at = ? WHERE id = ? AND status IN ('Queued', 'Running', 'Retrying')", (now_text(), now_text(), task_id))
         if task["shot_id"]:
             connection.execute("UPDATE shots SET status = '待生成', updated_at = ? WHERE id = ? AND status = '生成中'", (now_text(), task["shot_id"]))
+        if task["target_type"] == "asset":
+            asset_type = loads(task["parameters_json"], {}).get("assetType")
+            table = asset_type if asset_type in {"characters", "locations", "props"} else "locations"
+            connection.execute(f"UPDATE {table} SET status = '待确认', updated_at = ? WHERE id = ?", (now_text(), task["target_id"]))
         return task["project_id"]
 
 
@@ -618,6 +639,12 @@ def retry_generation_task(task_id: str) -> tuple[str, str]:
         connection.execute("UPDATE generation_tasks SET status = 'Retrying', retry_count = retry_count + 1, error_message = NULL, queued_at = ?, updated_at = ? WHERE id = ?", (now_text(), now_text(), task_id))
         if task["shot_id"]:
             connection.execute("UPDATE shots SET status = '生成中', updated_at = ? WHERE id = ?", (now_text(), task["shot_id"]))
+        if task["target_type"] == "asset":
+            asset_type = loads(task["parameters_json"], {}).get("assetType")
+            table = asset_type if asset_type in {"characters", "locations", "props"} else "locations"
+            connection.execute(f"UPDATE {table} SET status = '生成中', updated_at = ? WHERE id = ?", (now_text(), task["target_id"]))
+        if task["target_type"] == "agent_run":
+            connection.execute("UPDATE agent_runs SET status = 'queued', error_message = '', updated_at = ? WHERE id = ?", (now_text(), task["target_id"]))
         return task["project_id"], task_id
 
 

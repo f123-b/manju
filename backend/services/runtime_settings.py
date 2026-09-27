@@ -19,6 +19,10 @@ SETTING_ENV = {
     "cosyvoiceUrl": "SHORT_DRAMA_COSYVOICE_URL",
     "chatterboxUrl": "SHORT_DRAMA_CHATTERBOX_URL",
     "gptSovitsUrl": "SHORT_DRAMA_GPTSOVITS_URL",
+    "llmProviderUrl": "SHORT_DRAMA_LLM_PROVIDER_URL",
+    "llmProviderName": "SHORT_DRAMA_LLM_PROVIDER_NAME",
+    "llmModel": "SHORT_DRAMA_LLM_MODEL",
+    "llmApiKey": "SHORT_DRAMA_LLM_API_KEY",
 }
 
 DEFAULTS = {
@@ -31,6 +35,10 @@ DEFAULTS = {
     "cosyvoiceUrl": "",
     "chatterboxUrl": "",
     "gptSovitsUrl": "",
+    "llmProviderUrl": "",
+    "llmProviderName": "OpenAI Compatible",
+    "llmModel": "gpt-4o-mini",
+    "llmApiKey": "",
 }
 
 
@@ -48,11 +56,15 @@ def _raw_settings() -> dict[str, str]:
 def public_provider_settings() -> dict[str, Any]:
     values = _raw_settings()
     has_key = bool(values.get("providerApiKey"))
+    has_llm_key = bool(values.get("llmApiKey"))
     return {
-        **{key: value for key, value in values.items() if key != "providerApiKey"},
+        **{key: value for key, value in values.items() if key not in {"providerApiKey", "llmApiKey"}},
         "providerApiKey": "",
         "providerApiKeyMasked": "••••••••" if has_key else "",
         "apiKeySet": has_key,
+        "llmApiKey": "",
+        "llmApiKeyMasked": "••••••••" if has_llm_key else "",
+        "llmApiKeySet": has_llm_key,
     }
 
 
@@ -63,13 +75,13 @@ def save_provider_settings(payload: dict[str, Any]) -> dict[str, Any]:
             if key not in payload:
                 continue
             value = payload.get(key)
-            if key == "providerApiKey" and value in {None, "", "••••••••"}:
+            if key in {"providerApiKey", "llmApiKey"} and value in {None, "", "••••••••"}:
                 continue
             if value == "__CLEAR__":
                 value = ""
             connection.execute(
                 "INSERT INTO runtime_settings(key, value, is_secret, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, is_secret = excluded.is_secret, updated_at = excluded.updated_at",
-                (key, str(value or ""), int(key == "providerApiKey"), now_text()),
+                (key, str(value or ""), int(key in {"providerApiKey", "llmApiKey"}), now_text()),
             )
     return public_provider_settings()
 
@@ -80,6 +92,9 @@ def test_provider_connection(payload: dict[str, Any]) -> dict[str, Any]:
         provider = str(payload.get("voiceProvider") or "mock").lower()
         endpoint = {"cosyvoice": payload.get("cosyvoiceUrl"), "chatterbox": payload.get("chatterboxUrl"), "gpt-sovits": payload.get("gptSovitsUrl")}.get(provider)
         label = provider
+    elif provider_kind == "llm":
+        endpoint = payload.get("llmProviderUrl")
+        label = payload.get("llmProviderName") or "LLM Provider"
     else:
         endpoint = payload.get("providerUrl")
         label = payload.get("providerName") or "通用生成接口"
@@ -88,8 +103,9 @@ def test_provider_connection(payload: dict[str, Any]) -> dict[str, Any]:
     if not str(endpoint).startswith(("http://", "https://")):
         return {"ok": False, "status": "invalid", "message": "接口地址必须以 http:// 或 https:// 开头"}
     headers = {"Accept": "application/json, audio/wav"}
-    if payload.get("providerApiKey"):
-        headers["Authorization"] = f"Bearer {payload['providerApiKey']}"
+    api_key = payload.get("llmApiKey") if provider_kind == "llm" else payload.get("providerApiKey")
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
     try:
         request = Request(str(endpoint), headers=headers, method="GET")
         with urlopen(request, timeout=5) as response:

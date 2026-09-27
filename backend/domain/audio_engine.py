@@ -571,7 +571,68 @@ def create_audio_clip(project_id: str, payload: dict[str, Any]) -> dict[str, Any
         clip_id = payload.get("id") or new_id("ACL-")
         connection.execute("INSERT INTO audio_clips(id, project_id, episode_id, scene_id, track_type, media_asset_id, timeline_start_ms, source_start_ms, duration_ms, gain_db, fade_in_ms, fade_out_ms, linked_dialogue_line_id, metadata_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)", (clip_id, project_id, payload.get("episodeId"), payload.get("sceneId"), payload.get("trackType", "dialogue"), media_asset_id, int(payload.get("timelineStartMs", 0)), int(payload.get("sourceStartMs", 0)), int(payload.get("durationMs", 0)), float(payload.get("gainDb", 0)), int(payload.get("fadeInMs", 0)), int(payload.get("fadeOutMs", 0)), payload.get("linkedDialogueLineId"), dumps(payload.get("metadata", {}))))
         row = connection.execute("SELECT * FROM audio_clips WHERE id = ?", (clip_id,)).fetchone()
-        return {"id": row["id"], "trackType": row["track_type"], "timelineStartMs": row["timeline_start_ms"], "durationMs": row["duration_ms"], "outputUrl": _asset_url(connection, row["media_asset_id"]), "linkedDialogueLineId": row["linked_dialogue_line_id"]}
+        return _audio_clip_dict(connection, row)
+
+
+def _audio_clip_dict(connection, row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "projectId": row["project_id"],
+        "episodeId": row["episode_id"],
+        "sceneId": row["scene_id"],
+        "trackType": row["track_type"],
+        "mediaAssetId": row["media_asset_id"],
+        "outputUrl": _asset_url(connection, row["media_asset_id"]),
+        "timelineStartMs": row["timeline_start_ms"],
+        "sourceStartMs": row["source_start_ms"],
+        "durationMs": row["duration_ms"],
+        "gainDb": row["gain_db"],
+        "fadeInMs": row["fade_in_ms"],
+        "fadeOutMs": row["fade_out_ms"],
+        "linkedDialogueLineId": row["linked_dialogue_line_id"],
+        "stale": bool(row["stale"]),
+        "staleReason": row["stale_reason"],
+    }
+
+
+def patch_audio_clip(clip_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    allowed = {
+        "episodeId": "episode_id", "sceneId": "scene_id", "trackType": "track_type",
+        "timelineStartMs": "timeline_start_ms", "sourceStartMs": "source_start_ms",
+        "durationMs": "duration_ms", "gainDb": "gain_db", "fadeInMs": "fade_in_ms", "fadeOutMs": "fade_out_ms",
+    }
+    with session() as connection:
+        row = connection.execute("SELECT * FROM audio_clips WHERE id = ?", (clip_id,)).fetchone()
+        if not row:
+            raise KeyError(f"audio clip {clip_id} not found")
+        values = []
+        for key, column in allowed.items():
+            if key not in payload:
+                continue
+            value = payload[key]
+            if column in {"timeline_start_ms", "source_start_ms", "duration_ms", "fade_in_ms", "fade_out_ms"}:
+                value = int(value or 0)
+                if value < 0:
+                    raise ValueError(f"{key} 不能小于 0")
+            elif column == "gain_db":
+                value = float(value or 0)
+            values.append((column, value))
+        if values:
+            values.append(("updated_at", now_text()))
+            connection.execute(
+                f"UPDATE audio_clips SET {', '.join(f'{column} = ?' for column, _ in values)} WHERE id = ?",
+                [value for _, value in values] + [clip_id],
+            )
+        return _audio_clip_dict(connection, connection.execute("SELECT * FROM audio_clips WHERE id = ?", (clip_id,)).fetchone())
+
+
+def delete_audio_clip(clip_id: str) -> dict[str, Any]:
+    with session() as connection:
+        row = connection.execute("SELECT * FROM audio_clips WHERE id = ?", (clip_id,)).fetchone()
+        if not row:
+            raise KeyError(f"audio clip {clip_id} not found")
+        connection.execute("DELETE FROM audio_clips WHERE id = ?", (clip_id,))
+        return {"id": clip_id, "projectId": row["project_id"], "episodeId": row["episode_id"]}
 
 
 def _write_silence_or_mix(path: Path, clips: list[dict[str, Any]], connection) -> int:

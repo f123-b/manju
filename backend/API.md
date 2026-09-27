@@ -37,6 +37,15 @@ GET        /api/dialogue-lines/{line_id}/takes
 POST       /api/voice-takes/{take_id}/activate|run-qc
 GET        /api/voice-providers
 GET/POST   /api/projects/{project_id}/audio-clips
+PATCH/DELETE /api/audio-clips/{clip_id}
+POST        /api/projects/{project_id}/qc
+POST        /api/projects/{project_id}/continuity-check
+POST        /api/shots/{shot_id}/qc
+POST        /api/agent/runs
+GET         /api/agent/runs/{run_id}
+POST        /api/agent/runs/{run_id}/resume
+POST        /api/agent/runs/{run_id}/cancel
+POST/GET    /api/episodes/{episode_id}/render(s)
 ```
 
 生成任务会先写入 `generation_tasks` 的 `Queued` 状态，由独立后台 worker 领取；服务重启会把未完成的 `Running` 任务恢复为 `Queued`，不会依赖请求协程存活。

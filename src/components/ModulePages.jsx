@@ -38,6 +38,7 @@ function AgentPage({ project, stats, actions }) {
   const [stepState, setStepState] = useState(() => agentPlan.map(([id]) => ({ id, status: "pending" })));
   const [logs, setLogs] = useState(["Agent 已就绪，等待你的制作目标。"]);
   const [result, setResult] = useState("");
+  const [runId, setRunId] = useState(null);
 
   useEffect(() => {
     if (project.currentEpisodeId && project.currentEpisodeId !== episodeId && !running) {
@@ -47,8 +48,29 @@ function AgentPage({ project, stats, actions }) {
 
   const episode = project.episodes.find((item) => item.id === episodeId) || project.episodes[0];
   const currentShots = project.shots.filter((shot) => shot.episodeId === episodeId);
-  const addLog = (message) => setLogs((current) => [...current.slice(-7), message]);
-  const updateStep = (id, status) => setStepState((current) => current.map((step) => step.id === id ? { ...step, status } : step));
+  const syncRun = (run) => {
+    setRunId(run?.id || null);
+    setStepState(agentPlan.map(([id]) => ({ id, status: run?.steps?.find((step) => step.key === id)?.status === "success" ? "done" : run?.steps?.find((step) => step.key === id)?.status || "pending" })));
+    const nextLogs = (run?.steps || []).filter((step) => step.status === "success").map((step) => `${step.title}：已完成${step.output?.provider === "local-fallback" ? "（本地降级模式）" : ""}`);
+    setLogs(nextLogs.length ? nextLogs : ["Agent 已创建持久化执行记录，等待后台领取任务。"]);
+    if (run?.status === "success") setResult(`已完成 ${run.episodeId}：Agent 已准备场景和分镜，下一步可进入分镜工作台审核。`);
+    if (run?.status === "failed") setResult(`本轮执行已暂停：${run.error || "请处理错误后恢复执行"}`);
+  };
+
+  const pollAgent = async (id) => {
+    try {
+      const run = await actions.getAgentRun(id);
+      syncRun(run);
+      if (["queued", "running"].includes(run.status)) {
+        window.setTimeout(() => pollAgent(id), 900);
+      } else {
+        setRunning(false);
+      }
+    } catch (error) {
+      setRunning(false);
+      setResult(error?.message || "Agent 状态读取失败");
+    }
+  };
 
   const runAgent = async () => {
     if (running || actions.backendStatus !== "online") return;
@@ -56,48 +78,23 @@ function AgentPage({ project, stats, actions }) {
     setResult("");
     setStepState(agentPlan.map(([id]) => ({ id, status: "pending" })));
     setLogs([`收到目标：${goal.trim() || `推进 ${episodeId} 的剧本生产`}`]);
-    let activeStep = "context";
     try {
-      updateStep(activeStep, "running");
-      addLog(`读取 ${episodeId} 的故事规则与当前生产状态`);
-      await Promise.resolve();
-      updateStep(activeStep, "done");
-
-      activeStep = "matrix";
-      updateStep(activeStep, "running");
-      addLog("正在整理本集矩阵，确保先有节奏再进入镜头");
-      await actions.generateMatrix(episodeId, {});
-      updateStep(activeStep, "done");
-
-      activeStep = "scene";
-      updateStep(activeStep, "running");
-      let scenes = await actions.loadScenes(episodeId);
-      let scene = scenes[0];
-      if (!scene) {
-        addLog("当前剧集没有场景，Agent 自动创建第一个可拍场景");
-        scene = await actions.createScene(episodeId, { title: "Agent 场景", purpose: "推进本集核心冲突并留下下一集问题", summary: goal.trim(), timeOfDay: "夜晚" });
-      } else {
-        addLog(`复用场景 ${scene.id}：${scene.title}`);
-      }
-      updateStep(activeStep, "done");
-
-      activeStep = "script";
-      updateStep(activeStep, "running");
-      addLog(`正在为 ${scene.id} 生成动作与对白节拍`);
-      await actions.generateSceneScript(scene.id, {});
-      updateStep(activeStep, "done");
-
-      activeStep = "breakdown";
-      updateStep(activeStep, "running");
-      addLog("正在把场景节拍拆成可生成镜头");
-      const breakdown = await actions.generateBreakdown(scene.id, {});
-      updateStep(activeStep, "done");
-      setResult(`已完成 ${episodeId}：${scene.id} 已准备 ${breakdown.length} 个镜头，下一步可进入分镜工作台执行生成。`);
-      addLog("Agent 已完成本轮任务，等待你的审核");
+      const run = await actions.startAgentRun({ projectId: project.id, episodeId, goal });
+      syncRun(run);
+      pollAgent(run.id);
     } catch (error) {
-      updateStep(activeStep, "failed");
-      addLog(`执行暂停：${error?.message || "接口返回异常"}`);
-      setResult("本轮执行已暂停，请处理错误后重新运行。");
+      setRunning(false);
+      setResult(error?.message || "Agent 启动失败");
+    }
+  };
+
+  const stopAgent = async () => {
+    if (!runId) return;
+    try {
+      const run = await actions.cancelAgentRun(runId);
+      syncRun(run);
+    } catch (error) {
+      setResult(error?.message || "Agent 停止失败");
     } finally {
       setRunning(false);
     }
@@ -111,7 +108,7 @@ function AgentPage({ project, stats, actions }) {
         <label className="agent-episode-field">工作剧集<select value={episodeId} onChange={(event) => { setEpisodeId(event.target.value); actions.updateProject({ currentEpisodeId: event.target.value }); }}><option value="">选择剧集</option>{project.episodes.map((item) => <option key={item.id} value={item.id}>{item.id}　{item.title}</option>)}</select></label>
         <label className="agent-goal-field"><span>制作目标</span><textarea value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="例如：把 EP08 写成一场有反转的天台对峙，并拆成可生成镜头" /></label>
         <div className="agent-suggestions"><span>快速开始</span><button type="button" onClick={() => setGoal(`完成 ${episodeId} 的剧本到分镜流程`)}>完成本集到分镜</button><button type="button" onClick={() => setGoal(`为 ${episodeId} 补齐冲突升级和结尾钩子`)}>补齐本集节奏</button><button type="button" onClick={() => setGoal(`检查 ${episodeId} 的角色规则并修正镜头连续性`)}>检查连续性</button></div>
-        <div className="agent-command-footer"><span>{actions.backendStatus === "online" ? "Agent 会在写入前继承故事圣经和不可违反规则。" : "FastAPI 未连接，暂时不能执行 Agent 任务。"}</span><button className="primary-action" type="button" onClick={runAgent} disabled={running || actions.backendStatus !== "online"}>{running ? <><Stop size={16} />停止中…</> : <><Play size={16} weight="fill" />开始执行</>}</button></div>
+        <div className="agent-command-footer"><span>{actions.backendStatus === "online" ? "Agent 会持久化每一步，服务重启后可以继续。" : "FastAPI 未连接，暂时不能执行 Agent 任务。"}</span><button className="primary-action" type="button" onClick={running ? stopAgent : runAgent} disabled={actions.backendStatus !== "online"}>{running ? <><Stop size={16} />停止 Agent</> : <><Play size={16} weight="fill" />开始执行</>}</button></div>
       </section>
       <section className="module-section agent-plan-card">
         <div className="section-heading"><div><h2>Agent 执行计划</h2><p>每一步都有结果，随时可以回到工作台人工接管。</p></div><span className="agent-plan-count">{stepState.filter((step) => step.status === "done").length} / {stepState.length}</span></div>
@@ -376,9 +373,9 @@ function AssetsPage({ project, onAddAsset, onUpdateAsset, actions }) {
 }
 
 function GenerationPage({ project, onRetry, onCancel, onNavigate }) {
-  return <div className="module-page"><PageHeader eyebrow="Generation Center" title="生成任务" description="统一查看模型任务、成本和失败重试。" action={<button className="primary-action" type="button" onClick={() => onNavigate("分镜")}><Sparkle size={18} />选择镜头生成</button>} />
+  return <div className="module-page"><PageHeader eyebrow="Generation Center" title="统一任务中心" description="图片、视频、音频和 Agent 任务共用同一条持久队列，支持进度、成本、取消和重试。" action={<button className="primary-action" type="button" onClick={() => onNavigate("分镜")}><Sparkle size={18} />选择镜头生成</button>} />
     <div className="task-summary"><div><span>运行中</span><strong>{project.tasks.filter((task) => task.status === "Running").length}</strong></div><div><span>已成功</span><strong>{project.tasks.filter((task) => task.status === "Success").length}</strong></div><div><span>失败</span><strong>{project.tasks.filter((task) => task.status === "Failed").length}</strong></div><div><span>任务成本</span><strong>¥{project.tasks.reduce((sum, task) => sum + task.cost, 0).toFixed(2)}</strong></div></div>
-    <section className="module-section task-table"><div className="task-table-head"><span>任务</span><span>镜头</span><span>类型</span><span>模型</span><span>状态</span><span>成本</span><span>操作</span></div>{project.tasks.map((task) => <div key={task.id}><code>{task.id}</code><strong>{task.shotId}</strong><span>{task.type}</span><span>{task.model}</span><em className={`task-status ${task.status}`}>{task.status}</em><span>¥{task.cost.toFixed(2)}</span><span className="table-actions">{task.status === "Failed" || task.status === "Cancelled" ? <button type="button" onClick={() => onRetry(task.id)}>重试</button> : null}{task.status === "Running" ? <button type="button" onClick={() => onCancel(task.id)}>取消</button> : null}</span></div>)}</section>
+    <section className="module-section task-table"><div className="task-table-head"><span>任务</span><span>目标</span><span>类型</span><span>模型</span><span>状态</span><span>成本</span><span>操作</span></div>{project.tasks.map((task) => <div key={task.id}><code>{task.id}</code><strong>{task.shotId || task.targetId || "—"}</strong><span>{task.type}</span><span>{task.model}</span><em className={`task-status ${task.status}`}>{task.status}</em><span>¥{task.cost.toFixed(2)}</span><span className="table-actions">{task.status === "Failed" || task.status === "Cancelled" ? <button type="button" onClick={() => onRetry(task.id)}>重试</button> : null}{task.status === "Running" ? <button type="button" onClick={() => onCancel(task.id)}>取消</button> : null}</span></div>)}</section>
   </div>;
 }
 
@@ -444,20 +441,31 @@ function AudioPage({ project, actions }) {
   </div>;
 }
 
+function TimelineClipEditor({ clip, onSave, onDelete }) {
+  const [draft, setDraft] = useState({ timelineStartMs: clip.timelineStartMs || 0, durationMs: clip.durationMs || 0, gainDb: clip.gainDb || 0 });
+  useEffect(() => setDraft({ timelineStartMs: clip.timelineStartMs || 0, durationMs: clip.durationMs || 0, gainDb: clip.gainDb || 0 }), [clip.id, clip.timelineStartMs, clip.durationMs, clip.gainDb]);
+  const update = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
+  return <article className="timeline-clip-editor"><div><strong>{clip.linkedDialogueLineId || clip.id}</strong><small>{clip.trackType} · {clip.stale ? "需要重审" : "已入轨"}</small></div><label>起点 ms<input type="number" min="0" value={draft.timelineStartMs} onChange={(event) => update("timelineStartMs", Number(event.target.value))} /></label><label>时长 ms<input type="number" min="0" value={draft.durationMs} onChange={(event) => update("durationMs", Number(event.target.value))} /></label><label>增益 dB<input type="number" step="0.5" value={draft.gainDb} onChange={(event) => update("gainDb", Number(event.target.value))} /></label><button type="button" onClick={() => onSave(clip.id, draft)}>保存</button><button type="button" onClick={() => onDelete(clip.id)}>删除</button></article>;
+}
+
 function TimelinePage({ project, actions }) {
-  const shots = project.shots.filter((shot) => shot.episodeId === project.currentEpisodeId);
+  const [episodeId, setEpisodeId] = useState(project.currentEpisodeId);
+  useEffect(() => setEpisodeId(project.currentEpisodeId), [project.currentEpisodeId]);
+  const shots = project.shots.filter((shot) => shot.episodeId === episodeId);
   const total = shots.reduce((sum, shot) => sum + shot.duration, 0) || 1;
-  const audioClips = (project.audio?.clips || []).filter((clip) => clip.episodeId === project.currentEpisodeId);
-  const audioLines = (project.audio?.dialogueLines || []).filter((line) => line.episodeId === project.currentEpisodeId);
+  const audioClips = (project.audio?.clips || []).filter((clip) => clip.episodeId === episodeId);
+  const audioLines = (project.audio?.dialogueLines || []).filter((line) => line.episodeId === episodeId);
   const tracks = ["dialogue", "sfx", "ambience", "bgm"];
-  return <div className="module-page"><PageHeader eyebrow="Timeline" title={`${project.currentEpisodeId} 轻量时间线`} description="画面、对白和音乐分轨管理；先把每句对白审核通过，再生成本集混音。" action={<button className="primary-action" type="button" onClick={() => actions.mixdownEpisode(project.currentEpisodeId)}><SpeakerHigh size={17} />生成混音</button>} />
-    <section className="module-section timeline-editor"><div className="timeline-ruler">{Array.from({ length: Math.ceil(total / 4) + 1 }, (_, index) => <span key={index}>{index * 4}s</span>)}</div><div className="timeline-track"><strong>Video</strong><div>{shots.map((shot) => <button key={shot.id} style={{ flex: Math.max(1, shot.duration) }} type="button"><img src={shot.image} alt="" /><span>{shot.id}</span><small>{shot.duration}s</small></button>)}</div></div>{tracks.map((track) => <div className="timeline-track slim" key={track}><strong>{track === "dialogue" ? "Dialogue" : track.toUpperCase()}</strong><div>{audioClips.filter((clip) => clip.trackType === track).map((clip) => <span key={clip.id} style={{ flex: Math.max(1, (clip.durationMs || 1000) / 1000) }}>{clip.linkedDialogueLineId || `${track} clip`} · {Math.round((clip.durationMs || 0) / 1000)}s</span>)}{!audioClips.some((clip) => clip.trackType === track) && <span className="timeline-empty-track">{track === "dialogue" ? `${audioLines.filter((line) => line.activeTake).length} 条可用对白，去声音工作台入轨` : "空轨道"}</span>}</div></div>)}</section>
+  const run = (operation, message) => operation().then(() => actions.notify?.(message)).catch((error) => actions.notify?.(error?.message || "时间线操作失败", "error"));
+  return <div className="module-page"><PageHeader eyebrow="Timeline" title={`${episodeId} 可编辑时间线`} description="选择剧集后直接调整音频片段的起点、时长和增益；保存会写回后台数据库。" action={<div className="page-header-actions"><select value={episodeId || ""} onChange={(event) => setEpisodeId(event.target.value)}>{project.episodes.map((episode) => <option key={episode.id} value={episode.id}>{episode.id} · {episode.title}</option>)}</select><button type="button" onClick={() => actions.mixdownEpisode(episodeId)}><SpeakerHigh size={17} />生成混音</button><button className="primary-action" type="button" onClick={() => actions.renderEpisode(episodeId)}>渲染 MP4</button></div>} />
+    <section className="module-section timeline-editor"><div className="timeline-ruler">{Array.from({ length: Math.ceil(total / 4) + 1 }, (_, index) => <span key={index}>{index * 4}s</span>)}</div><div className="timeline-track"><strong>Video</strong><div>{shots.map((shot) => <button key={shot.id} style={{ flex: Math.max(1, shot.duration) }} type="button"><img src={shot.image} alt="" /><span>{shot.id}</span><small>{shot.duration}s</small></button>)}</div></div>{tracks.map((track) => { const clips = audioClips.filter((clip) => clip.trackType === track); return <div className="timeline-track slim" key={track}><strong>{track === "dialogue" ? "Dialogue" : track.toUpperCase()}</strong><div>{clips.map((clip) => <div key={clip.id} style={{ flex: Math.max(1, (clip.durationMs || 1000) / 1000) }}><span>{clip.linkedDialogueLineId || `${track} clip`} · {Math.round((clip.durationMs || 0) / 1000)}s</span><TimelineClipEditor clip={clip} onSave={(id, patch) => run(() => actions.patchAudioClip(id, patch), "时间线片段已保存")} onDelete={(id) => run(() => actions.deleteAudioClip(id), "时间线片段已删除")} /></div>)}{!clips.length && <span className="timeline-empty-track">{track === "dialogue" ? `${audioLines.filter((line) => line.activeTake).length} 条可用对白，去声音工作台入轨` : "空轨道"}</span>}</div></div>; })}</section>
   </div>;
 }
 
-function QCPage({ project, onReviewShot, onRegenerate }) {
+function QCPage({ project, actions, onReviewShot, onRegenerate }) {
   const shots = project.shots.filter((shot) => shot.episodeId === project.currentEpisodeId);
-  return <div className="module-page"><PageHeader eyebrow="AI QC" title="质量检查" description="检查角色一致性、画面连续性和镜头生产状态。" />
+  const run = (operation) => operation().catch(() => {});
+  return <div className="module-page"><PageHeader eyebrow="AI QC" title="质量检查" description="检查角色一致性、画面连续性和镜头生产状态。" action={<div className="page-header-actions"><button type="button" onClick={() => run(actions.runProjectQC)}>运行视觉 QC</button><button className="primary-action" type="button" onClick={() => run(actions.runContinuityCheck)}>检查连续性</button></div>} />
     <div className="qc-summary"><div><strong>{shots.filter((shot) => shot.qcScore >= 90).length}</strong><span>通过</span></div><div><strong>{shots.filter((shot) => shot.qcScore && shot.qcScore < 90).length}</strong><span>需复核</span></div><div><strong>{shots.filter((shot) => !shot.qcScore).length}</strong><span>未检测</span></div></div>
     <section className="module-section qc-list">{shots.map((shot) => <article key={shot.id}><img src={shot.image} alt="" /><div><span>{shot.id}</span><strong>{shot.description}</strong><small>{shot.qcScore ? `角色一致性 ${shot.qcScore}%` : "等待生成后检测"}</small></div><em className={shot.qcScore >= 90 ? "pass" : shot.qcScore ? "warning" : "pending"}>{shot.qcScore ? `${shot.qcScore}%` : "--"}</em><div>{shot.status === "已生成" && <button type="button" onClick={() => onReviewShot(shot.id)}>{shot.reviewed ? <CheckCircle size={16} weight="fill" /> : <Check size={16} />}{shot.reviewed ? "已审核" : "通过"}</button>}{shot.qcScore && shot.qcScore < 90 && <button type="button" onClick={() => onRegenerate(shot.id)}>重新生成</button>}</div></article>)}</section>
   </div>;
@@ -470,7 +478,7 @@ function ExportPage({ project, onExport }) {
 }
 
 function SettingsPage({ project, onUpdateProject, backendStatus, providerInfo, actions }) {
-  const [settings, setSettings] = useState({ providerUrl: "", providerName: "External Video API", providerModel: "video-default", providerApiKey: "", providerApiKeyMasked: "", apiKeySet: false, voiceProvider: "mock", voiceModel: "voice-default", cosyvoiceUrl: "", chatterboxUrl: "", gptSovitsUrl: "" });
+  const [settings, setSettings] = useState({ providerUrl: "", providerName: "External Video API", providerModel: "video-default", providerApiKey: "", providerApiKeyMasked: "", apiKeySet: false, voiceProvider: "mock", voiceModel: "voice-default", cosyvoiceUrl: "", chatterboxUrl: "", gptSovitsUrl: "", llmProviderUrl: "", llmProviderName: "OpenAI Compatible", llmModel: "gpt-4o-mini", llmApiKey: "", llmApiKeyMasked: "", llmApiKeySet: false });
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsNotice, setSettingsNotice] = useState("");
   const providerLabel = providerInfo?.mode === "remote" ? `外部接口 · ${providerInfo.provider}` : providerInfo?.mode === "demo" ? "本地演示生成器" : "未连接";
@@ -505,7 +513,7 @@ function SettingsPage({ project, onUpdateProject, backendStatus, providerInfo, a
       setSettingsBusy(false);
     }
   };
-  return <div className="module-page settings-page"><PageHeader eyebrow="Settings" title="项目设置" description="项目资料和生成 API 都在这里配置，保存后后台任务会立即切换。" /><section className="module-section settings-form"><label>项目名称<input value={project.title} onChange={(event) => onUpdateProject({ title: event.target.value })} /></label><label>项目状态<select value={project.status} onChange={(event) => onUpdateProject({ status: event.target.value })}>{["策划中", "制作中", "审核中", "已完成"].map((item) => <option key={item}>{item}</option>)}</select></label><label>预算（元）<input type="number" min="0" value={project.budget} onChange={(event) => onUpdateProject({ budget: Number(event.target.value) })} /></label><label>计划完成日期<input type="date" value={project.dueDate} onChange={(event) => onUpdateProject({ dueDate: event.target.value })} /></label></section><section className="module-section settings-api-card"><div className="settings-api-heading"><div><span className="section-kicker">Provider Settings</span><h2>生成 API 配置</h2><p>不填写时使用本地 WAV / 图片演示 Provider；填写后，新任务会调用外部服务。API Key 仅保存在本机后台，页面只显示掩码。</p></div><span className={`status-pill ${backendStatus === "online" ? "success" : "muted"}`}>{providerLabel}</span></div><div className="settings-api-form"><label className="settings-api-wide">通用图片/视频 API 地址<span>POST JSON 接口，例如你的统一生成网关</span><input value={settings.providerUrl || ""} onChange={(event) => update("providerUrl", event.target.value)} placeholder="https://your-provider.example.com/v1/generate" /></label><label>Provider 名称<input value={settings.providerName || ""} onChange={(event) => update("providerName", event.target.value)} placeholder="External Video API" /></label><label>默认模型<input value={settings.providerModel || ""} onChange={(event) => update("providerModel", event.target.value)} placeholder="video-default" /></label><label className="settings-api-wide">API Key<input type="password" value={settings.providerApiKey || ""} onChange={(event) => update("providerApiKey", event.target.value)} placeholder={settings.apiKeySet ? "已保存密钥，留空保持不变" : "sk-..."} autoComplete="off" /></label><div className="settings-api-wide settings-api-actions"><button type="button" onClick={() => testSettings("video")} disabled={settingsBusy || !settings.providerUrl}>测试通用接口</button></div><label>声音 Provider<select value={settings.voiceProvider || "mock"} onChange={(event) => update("voiceProvider", event.target.value)}>{[["mock", "本地 WAV Demo"], ["cosyvoice", "CosyVoice HTTP"], ["chatterbox", "Chatterbox HTTP"], ["gpt-sovits", "GPT-SoVITS HTTP"]].map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>声音模型<input value={settings.voiceModel || ""} onChange={(event) => update("voiceModel", event.target.value)} placeholder="voice-default" /></label><label>CosyVoice 地址<input value={settings.cosyvoiceUrl || ""} onChange={(event) => update("cosyvoiceUrl", event.target.value)} placeholder="http://127.0.0.1:50000/..." /></label><label>Chatterbox 地址<input value={settings.chatterboxUrl || ""} onChange={(event) => update("chatterboxUrl", event.target.value)} placeholder="http://127.0.0.1:8001/tts" /></label><label>GPT-SoVITS 地址<input value={settings.gptSovitsUrl || ""} onChange={(event) => update("gptSovitsUrl", event.target.value)} placeholder="http://127.0.0.1:9880/tts" /></label><div className="settings-api-actions settings-api-wide"><button type="button" onClick={() => testSettings("audio")} disabled={settingsBusy || settings.voiceProvider === "mock"}>测试声音接口</button><button className="primary-action" type="button" onClick={saveSettings} disabled={settingsBusy || backendStatus !== "online"}>{settingsBusy ? "保存中…" : "保存 API 配置"}</button></div></div>{settingsNotice && <div className="settings-api-notice">{settingsNotice}</div>}<small className="settings-api-footnote">连接测试只检查地址是否可访问，不会消耗生成额度。CosyVoice、Chatterbox 和 GPT-SoVITS 仍需在本机或服务器单独运行。</small></section><section className="module-section api-status-card"><div><span className="section-kicker">API Runtime</span><h3>任务运行状态</h3><p>{backendStatus === "online" ? (providerInfo?.mode === "remote" ? "已配置外部生成平台，新的任务会写入持久队列并由后台执行。" : "当前使用本地演示 Provider；保存外部地址后会自动切换。") : "FastAPI 未连接，生成任务无法同步到服务端。"}</p></div><span className={`status-pill ${backendStatus === "online" ? "success" : "muted"}`}>{providerLabel}</span></section></div>;
+  return <div className="module-page settings-page"><PageHeader eyebrow="Settings" title="项目设置" description="项目资料和生成 API 都在这里配置，保存后后台任务会立即切换。" /><section className="module-section settings-form"><label>项目名称<input value={project.title} onChange={(event) => onUpdateProject({ title: event.target.value })} /></label><label>项目状态<select value={project.status} onChange={(event) => onUpdateProject({ status: event.target.value })}>{["策划中", "制作中", "审核中", "已完成"].map((item) => <option key={item}>{item}</option>)}</select></label><label>预算（元）<input type="number" min="0" value={project.budget} onChange={(event) => onUpdateProject({ budget: Number(event.target.value) })} /></label><label>计划完成日期<input type="date" value={project.dueDate} onChange={(event) => onUpdateProject({ dueDate: event.target.value })} /></label></section><section className="module-section settings-api-card"><div className="settings-api-heading"><div><span className="section-kicker">Provider Settings</span><h2>统一生成 API 配置</h2><p>图片、视频、声音和 LLM 都从这里配置。API Key 仅保存在本机后台，页面只显示掩码。</p></div><span className={`status-pill ${backendStatus === "online" ? "success" : "muted"}`}>{providerLabel}</span></div><div className="settings-api-form"><label className="settings-api-wide">通用图片/视频 API 地址<span>POST JSON 接口，例如你的统一生成网关</span><input value={settings.providerUrl || ""} onChange={(event) => update("providerUrl", event.target.value)} placeholder="https://your-provider.example.com/v1/generate" /></label><label>Provider 名称<input value={settings.providerName || ""} onChange={(event) => update("providerName", event.target.value)} placeholder="External Video API" /></label><label>默认模型<input value={settings.providerModel || ""} onChange={(event) => update("providerModel", event.target.value)} placeholder="video-default" /></label><label className="settings-api-wide">API Key<input type="password" value={settings.providerApiKey || ""} onChange={(event) => update("providerApiKey", event.target.value)} placeholder={settings.apiKeySet ? "已保存密钥，留空保持不变" : "sk-..."} autoComplete="off" /></label><div className="settings-api-wide settings-api-actions"><button type="button" onClick={() => testSettings("video")} disabled={settingsBusy || !settings.providerUrl}>测试通用接口</button></div><label className="settings-api-wide">LLM / Agent API 地址<span>OpenAI 兼容 Chat Completions 地址或 v1 基地址</span><input value={settings.llmProviderUrl || ""} onChange={(event) => update("llmProviderUrl", event.target.value)} placeholder="https://api.openai.com/v1" /></label><label>LLM Provider 名称<input value={settings.llmProviderName || ""} onChange={(event) => update("llmProviderName", event.target.value)} placeholder="OpenAI Compatible" /></label><label>LLM 模型<input value={settings.llmModel || ""} onChange={(event) => update("llmModel", event.target.value)} placeholder="gpt-4o-mini" /></label><label className="settings-api-wide">LLM API Key<input type="password" value={settings.llmApiKey || ""} onChange={(event) => update("llmApiKey", event.target.value)} placeholder={settings.llmApiKeySet ? "已保存密钥，留空保持不变" : "sk-..."} autoComplete="off" /></label><div className="settings-api-wide settings-api-actions"><button type="button" onClick={() => testSettings("llm")} disabled={settingsBusy || !settings.llmProviderUrl}>测试 LLM 接口</button></div><label>声音 Provider<select value={settings.voiceProvider || "mock"} onChange={(event) => update("voiceProvider", event.target.value)}>{[["mock", "本地 WAV Demo"], ["cosyvoice", "CosyVoice HTTP"], ["chatterbox", "Chatterbox HTTP"], ["gpt-sovits", "GPT-SoVITS HTTP"]].map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label><label>声音模型<input value={settings.voiceModel || ""} onChange={(event) => update("voiceModel", event.target.value)} placeholder="voice-default" /></label><label>CosyVoice 地址<input value={settings.cosyvoiceUrl || ""} onChange={(event) => update("cosyvoiceUrl", event.target.value)} placeholder="http://127.0.0.1:50000/..." /></label><label>Chatterbox 地址<input value={settings.chatterboxUrl || ""} onChange={(event) => update("chatterboxUrl", event.target.value)} placeholder="http://127.0.0.1:8001/tts" /></label><label>GPT-SoVITS 地址<input value={settings.gptSovitsUrl || ""} onChange={(event) => update("gptSovitsUrl", event.target.value)} placeholder="http://127.0.0.1:9880/tts" /></label><div className="settings-api-actions settings-api-wide"><button type="button" onClick={() => testSettings("audio")} disabled={settingsBusy || settings.voiceProvider === "mock"}>测试声音接口</button><button className="primary-action" type="button" onClick={saveSettings} disabled={settingsBusy || backendStatus !== "online"}>{settingsBusy ? "保存中…" : "保存 API 配置"}</button></div></div>{settingsNotice && <div className="settings-api-notice">{settingsNotice}</div>}<small className="settings-api-footnote">连接测试只检查地址是否可访问，不会消耗生成额度。LLM 需支持 OpenAI 兼容 Chat Completions；CosyVoice、Chatterbox 和 GPT-SoVITS 仍需在本机或服务器单独运行。</small></section><section className="module-section api-status-card"><div><span className="section-kicker">API Runtime</span><h3>任务运行状态</h3><p>{backendStatus === "online" ? (providerInfo?.mode === "remote" ? "已配置外部生成平台，新的任务会写入持久队列并由后台执行。" : "当前使用本地演示 Provider；保存外部地址后会自动切换。") : "FastAPI 未连接，生成任务无法同步到服务端。"}</p></div><span className={`status-pill ${backendStatus === "online" ? "success" : "muted"}`}>{providerLabel}</span></section></div>;
 }
 
 export function ModulePage({ activeNav, project, stats, actions }) {
@@ -518,7 +526,7 @@ export function ModulePage({ activeNav, project, stats, actions }) {
   if (activeNav === "生成") return <GenerationPage project={project} onRetry={actions.retryTask} onCancel={actions.cancelTask} onNavigate={actions.navigate} />;
   if (activeNav === "声音") return <AudioPage project={project} actions={actions} />;
   if (activeNav === "时间线") return <TimelinePage project={project} actions={actions} />;
-  if (activeNav === "质检") return <QCPage project={project} onReviewShot={actions.reviewShot} onRegenerate={actions.regenerateShot} />;
+  if (activeNav === "质检") return <QCPage project={project} actions={actions} onReviewShot={actions.reviewShot} onRegenerate={actions.regenerateShot} />;
   if (activeNav === "导出") return <ExportPage project={project} onExport={actions.exportProject} />;
   return <SettingsPage project={project} onUpdateProject={actions.updateProject} backendStatus={actions.backendStatus} providerInfo={actions.providerInfo} actions={actions} />;
 }

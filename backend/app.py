@@ -79,6 +79,8 @@ from .domain.audio_engine import (
     list_voice_profiles,
     lock_voice_profile,
     mixdown_episode,
+    patch_audio_clip,
+    delete_audio_clip,
     patch_dialogue_line,
     patch_voice_profile,
     provider_definitions,
@@ -92,6 +94,9 @@ from .services.asset_generation_service import generate_asset_image
 from .services.script_service import generate_episode_matrix, generate_scene_script, generate_shot_breakdown
 from .services.task_engine import task_engine
 from .services.runtime_settings import _raw_settings, public_provider_settings, save_provider_settings, test_provider_connection
+from .services.agent_service import cancel_agent_run, create_agent_run, get_agent_run, resume_agent_run
+from .services.qc_service import run_project_continuity_check, run_project_qc, run_shot_visual_qc
+from .services.render_service import list_render_jobs, render_episode_mp4
 
 
 app = FastAPI(title="Short Drama OS API", version="1.0.0")
@@ -157,10 +162,46 @@ async def patch_provider_settings(payload: dict[str, Any] = Body(...)) -> dict[s
 async def post_provider_settings_test(payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
     settings = _raw_settings()
     for key, value in (payload or {}).items():
-        if key == "providerApiKey" and not value:
+        if key in {"providerApiKey", "llmApiKey"} and not value:
             continue
         settings[key] = value
     return await asyncio.to_thread(test_provider_connection, settings)
+
+
+@app.post("/api/agent/runs")
+async def post_agent_run(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        run = create_agent_run(payload.get("projectId", PROJECT_ID), payload.get("episodeId") or project_response(payload.get("projectId", PROJECT_ID))["currentEpisodeId"], payload.get("goal", ""))
+        task_engine.wake()
+        return {"run": run}
+    except (KeyError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/agent/runs/{run_id}")
+async def get_agent_run_resource(run_id: str) -> dict[str, Any]:
+    try:
+        return {"run": get_agent_run(run_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/agent/runs/{run_id}/resume")
+async def resume_agent_run_resource(run_id: str) -> dict[str, Any]:
+    try:
+        run = resume_agent_run(run_id)
+        task_engine.wake()
+        return {"run": run}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/agent/runs/{run_id}/cancel")
+async def cancel_agent_run_resource(run_id: str) -> dict[str, Any]:
+    try:
+        return {"run": cancel_agent_run(run_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
 
 
 @app.get("/api/projects")
@@ -308,6 +349,26 @@ async def delete_shot_resource(shot_id: str) -> dict[str, Any]:
         raise not_found(str(error)) from error
 
 
+@app.post("/api/shots/{shot_id}/qc")
+async def post_shot_qc(shot_id: str) -> dict[str, Any]:
+    try:
+        return {"result": run_shot_visual_qc(shot_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/qc")
+async def post_project_qc(project_id: str) -> dict[str, Any]:
+    project_response(project_id)
+    return {"result": run_project_qc(project_id)}
+
+
+@app.post("/api/projects/{project_id}/continuity-check")
+async def post_project_continuity_check(project_id: str) -> dict[str, Any]:
+    project_response(project_id)
+    return {"result": run_project_continuity_check(project_id)}
+
+
 @app.get("/api/projects/{project_id}/assets")
 async def get_assets(project_id: str) -> dict[str, Any]:
     return project_response(project_id)["assets"]
@@ -336,6 +397,24 @@ async def post_project_audio_clip(project_id: str, payload: dict[str, Any] = Bod
         raise not_found(str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.patch("/api/audio-clips/{clip_id}")
+async def patch_audio_clip_resource(clip_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return {"clip": patch_audio_clip(clip_id, payload)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.delete("/api/audio-clips/{clip_id}")
+async def delete_audio_clip_resource(clip_id: str) -> dict[str, Any]:
+    try:
+        return delete_audio_clip(clip_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
 
 
 @app.post("/api/projects/{project_id}/{asset_type}")
@@ -530,11 +609,25 @@ async def post_episode_mixdown(episode_id: str, payload: Optional[dict[str, Any]
         raise not_found(str(error)) from error
 
 
+@app.post("/api/episodes/{episode_id}/render")
+async def post_episode_render(episode_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
+    try:
+        return {"render": await asyncio.to_thread(render_episode_mp4, episode_id, payload or {})}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/episodes/{episode_id}/renders")
+async def get_episode_renders(episode_id: str) -> dict[str, Any]:
+    return {"items": list_render_jobs(episode_id)}
+
+
 @app.get("/generated-media/{filename}")
 async def get_generated_media(filename: str):
     from fastapi.responses import FileResponse
 
-    candidate = (DATA_DIR / "generated-audio" / filename).resolve()
+    candidates = [(DATA_DIR / "generated-audio" / filename).resolve(), (DATA_DIR / "generated-video" / filename).resolve()]
+    candidate = next((item for item in candidates if item.is_file()), candidates[0])
     if DATA_DIR.resolve() not in candidate.parents or not candidate.is_file():
         raise not_found("音频文件不存在")
     return FileResponse(candidate)

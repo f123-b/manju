@@ -18,6 +18,7 @@ import {
   generateRemoteSceneScript,
   generateRemoteShot,
   getRemoteProviderSettings,
+  getRemoteAgentRun,
   getRemoteHealth,
   getRemoteProject,
   getRemoteScenes,
@@ -27,6 +28,8 @@ import {
   createRemoteCharacterLook,
   activateRemoteTake,
   createRemoteAudioClip,
+  patchRemoteAudioClip,
+  deleteRemoteAudioClip,
   createRemoteVoiceProfile,
   directRemotePerformance,
   extractRemoteDialogueLines,
@@ -35,6 +38,7 @@ import {
   lockRemoteCharacter,
   lockRemoteVoiceProfile,
   mixdownRemoteEpisode,
+  renderRemoteEpisode,
   unlockRemoteCharacter,
   unlockRemoteVoiceProfile,
   patchRemoteDialogueLine,
@@ -48,7 +52,13 @@ import {
   patchRemoteShot,
   patchRemoteStoryBible,
   retryRemoteTask,
+  startRemoteAgentRun,
+  resumeRemoteAgentRun,
+  cancelRemoteAgentRun,
   runRemoteTakeQC,
+  runRemoteShotQC,
+  runRemoteProjectQC,
+  runRemoteContinuityCheck,
   saveRemoteProject,
   saveRemoteProviderSettings,
   testRemoteProviderSettings,
@@ -194,6 +204,7 @@ export function App() {
   }, [backendStatus, notify, pollRemoteGeneration, scheduleCompletion]);
 
   const actions = {
+    notify,
     navigate: setActiveNav,
     backendStatus,
     providerInfo,
@@ -411,12 +422,36 @@ export function App() {
         return clip;
       });
     },
+    patchAudioClip: (clipId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteAudioClip(clipId, payload).then(async (clip) => {
+        setProject(await getRemoteProject());
+        return clip;
+      });
+    },
+    deleteAudioClip: (clipId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return deleteRemoteAudioClip(clipId).then(async (result) => {
+        setProject(await getRemoteProject());
+        notify("时间线片段已删除");
+        return result;
+      });
+    },
     mixdownEpisode: (episodeId) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return mixdownRemoteEpisode(episodeId).then(async (mixdown) => {
         setProject(await getRemoteProject());
         notify("本集混音已生成");
         return mixdown;
+      });
+    },
+    renderEpisode: (episodeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return renderRemoteEpisode(episodeId).then((render) => {
+        if (render.status === "blocked") notify(render.error || "MP4 渲染环境未就绪", "error");
+        else if (render.status === "ready") notify("MP4 已渲染完成");
+        else notify(`MP4 渲染状态：${render.status}`);
+        return render;
       });
     },
     getProviderSettings: () => {
@@ -434,6 +469,43 @@ export function App() {
     testProviderSettings: (payload = {}) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return testRemoteProviderSettings(payload);
+    },
+    startAgentRun: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return startRemoteAgentRun(payload);
+    },
+    getAgentRun: (runId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return getRemoteAgentRun(runId);
+    },
+    resumeAgentRun: (runId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return resumeRemoteAgentRun(runId);
+    },
+    cancelAgentRun: (runId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return cancelRemoteAgentRun(runId);
+    },
+    runShotQC: (shotId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return runRemoteShotQC(shotId).then(async (result) => {
+        setProject(await getRemoteProject());
+        return result;
+      });
+    },
+    runProjectQC: () => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return runRemoteProjectQC().then(async (result) => {
+        setProject(await getRemoteProject());
+        return result;
+      });
+    },
+    runContinuityCheck: () => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return runRemoteContinuityCheck().then(async (result) => {
+        setProject(await getRemoteProject());
+        return result;
+      });
     },
     saveScene: (sceneId, patch) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
