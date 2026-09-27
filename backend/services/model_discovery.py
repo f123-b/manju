@@ -111,16 +111,19 @@ def _classify(raw: Any, requested_kind: str) -> dict[str, Any] | None:
         add("audio")
     if any(token in haystack for token in ("video", "text-to-video", "image-to-video", "kling", "seedance", "wan2", "wan-", "vidu", "runway", "luma", "hailuo", "cogvideo")) or capabilities & {"video"}:
         add("video")
-    if any(token in haystack for token in ("flux", "stable-diffusion", "sdxl", "sd3", "dall-e", "image-generation", "text-to-image", "qwen-image", "kolors", "midjourney", "playground", "comfy")) or capabilities & {"image", "image_generation"}:
+    if any(token in haystack for token in ("gpt-image", "image-2", "flux", "stable-diffusion", "sdxl", "sd3", "dall-e", "image-generation", "text-to-image", "qwen-image", "kolors", "midjourney", "playground", "comfy")) or capabilities & {"image", "image_generation"}:
         add("image")
     if any(token in haystack for token in ("vision", "-vl", "_vl", "multimodal", "omni", "llava", "pixtral", "minicpm-v", "gpt-4o", "gemini")) or capabilities & {"vision", "image_input", "image understanding"}:
         add("vision")
 
     if not categories:
-        if requested_kind in {"image", "video", "audio"}:
+        text_model_markers = ("gpt-", "claude", "deepseek", "minimax", "llama", "qwen", "mistral", "gemma", "phi-")
+        if requested_kind in {"llm", "agent"} or any(token in haystack for token in text_model_markers):
+            add("text")
+        elif requested_kind in {"image", "video", "audio"}:
             add(requested_kind)
         else:
-            add("text")
+            add("unknown")
     if "vision" in categories or "text" in categories or requested_kind in {"llm", "agent"}:
         add("text")
 

@@ -33,6 +33,8 @@ test("discovers and classifies OpenAI-compatible models", async (t) => {
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ data: [
       { id: "MiniMaxAI/MiniMax-VL-01", capabilities: { text: true, vision: true } },
+      { id: "gpt-image-2.5-flare" },
+      { id: "gpt-6-sol" },
       { id: "black-forest-labs/FLUX.1-schnell" },
       { id: "Wan-AI/Wan2.1-T2V-14B" },
       { id: "BAAI/bge-m3" },
@@ -60,10 +62,12 @@ test("discovers and classifies OpenAI-compatible models", async (t) => {
   const payload = await response.json();
   assert.equal(response.ok, true);
   assert.deepEqual(payload.models.find((item) => item.modelId.includes("FLUX"))?.type, "image");
+  assert.deepEqual(payload.models.find((item) => item.modelId.includes("gpt-image"))?.type, "image");
+  assert.deepEqual(payload.models.find((item) => item.modelId === "gpt-6-sol")?.type, "text");
   assert.deepEqual(payload.models.find((item) => item.modelId.includes("Wan2"))?.type, "video");
   assert.deepEqual(payload.models.find((item) => item.modelId.includes("MiniMax"))?.type, "vision");
   assert.deepEqual(payload.models.find((item) => item.modelId.includes("bge"))?.type, "embedding");
-  assert.deepEqual(payload.groups.map((group) => group.type).sort(), ["embedding", "image", "video", "vision"]);
+  assert.deepEqual(payload.groups.map((group) => group.type).sort(), ["embedding", "image", "text", "video", "vision"]);
 
   const catalogResponse = await fetch(`${base}/api/models`);
   const catalog = await catalogResponse.json();

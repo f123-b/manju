@@ -34,6 +34,11 @@ async function waitForTask(base, taskId) {
 test("normalizes common image API responses and rejects false successes", async (t) => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), "short-drama-http-provider-"));
   const provider = createServer((request, response) => {
+    if (request.method === "POST" && request.url === "/v1/images/generations") {
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(JSON.stringify({ data: [{ url: "http://127.0.0.1:8134/auto-generated.png" }] }));
+      return;
+    }
     if (request.method === "POST" && request.url === "/image") {
       response.writeHead(200, { "content-type": "application/json" });
       response.end(JSON.stringify({ data: [{ url: "http://127.0.0.1:8134/generated.png" }] }));
@@ -61,6 +66,14 @@ test("normalizes common image API responses and rejects false successes", async 
 
   const base = "http://127.0.0.1:8133";
   await waitForHealth(base);
+  const saveBase = await fetch(`${base}/api/settings/providers`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ providerUrl: "http://127.0.0.1:8134/v1", providerName: "OpenAI Image API", providerModel: "gpt-image-2.5-flare", providerApiKey: "secret" }) });
+  assert.equal(saveBase.ok, true);
+  const autoRouted = await (await fetch(`${base}/api/projects/P001/assets/generate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ assetType: "locations", name: "自动路由场景", prompt: "夜晚天台" }) })).json();
+  const autoTask = await waitForTask(base, autoRouted.taskId);
+  assert.equal(autoTask.status, "Success");
+  const autoProject = await (await fetch(`${base}/api/projects/P001`)).json();
+  assert.equal(autoProject.assets.locations.find((item) => item.id === autoRouted.asset.id).image, "http://127.0.0.1:8134/auto-generated.png");
+
   const save = async (url) => fetch(`${base}/api/settings/providers`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ providerUrl: `http://127.0.0.1:8134${url}`, providerName: "Test Image API", providerModel: "test-image", providerApiKey: "secret" }) });
   assert.equal((await save("/image")).ok, true);
   const created = await (await fetch(`${base}/api/projects/P001/assets/generate`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ assetType: "locations", name: "API 场景", prompt: "夜晚天台" }) })).json();

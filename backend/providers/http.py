@@ -10,12 +10,47 @@ from typing import Any
 from .base import BaseProvider
 
 
+_IMAGE_MODEL_MARKERS = (
+    "gpt-image",
+    "image-2",
+    "dall-e",
+    "flux",
+    "stable-diffusion",
+    "sdxl",
+    "sd3",
+    "qwen-image",
+    "kolors",
+    "playground",
+    "midjourney",
+)
+_VIDEO_MODEL_MARKERS = ("video", "text-to-video", "image-to-video", "kling", "seedance", "wan2", "wan-", "vidu", "runway", "luma", "hailuo", "cogvideo")
+
+
+def _contains_model_marker(model: str | None, markers: tuple[str, ...]) -> bool:
+    value = str(model or "").lower()
+    return any(marker in value for marker in markers)
+
+
+def resolve_generation_url(url: str, kind: str, model: str | None = None) -> str:
+    """Resolve an OpenAI-compatible base URL to a concrete generation route."""
+    value = str(url or "").rstrip("/")
+    lowered = value.lower()
+    if not value or lowered.endswith(("/images/generations", "/image/generations", "/videos/generations", "/video/generations", "/generate")):
+        return value
+    if lowered.endswith("/v1"):
+        if kind == "image" or _contains_model_marker(model, _IMAGE_MODEL_MARKERS):
+            return f"{value}/images/generations"
+        if kind == "video" and _contains_model_marker(model, _VIDEO_MODEL_MARKERS):
+            return f"{value}/videos/generations"
+    return value
+
+
 class HttpProvider(BaseProvider):
     """Generic async adapter for a configured external provider."""
 
     def __init__(self, kind: str, url: str, provider_name: str, model: str, api_key: str | None, status_url_template: str | None = None) -> None:
         self.kind = kind
-        self.url = url.rstrip("/")
+        self.url = resolve_generation_url(url, kind, model)
         self.provider = provider_name
         self.model = model
         self.api_key = api_key

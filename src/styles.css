@@ -1183,6 +1183,7 @@ button { color: inherit; }
 .modal-field { display: grid; gap: 7px; color: #657793; font-size: 11px; }
 .modal-field > span { display: flex; align-items: center; justify-content: space-between; }
 .modal-field > span i { color: #37a36e; font-size: 9px; font-style: normal; font-weight: 400; }
+.endpoint-preview { overflow: hidden; color: #6e8fbe; font-family: ui-monospace, monospace; font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
 .modal-field input, .model-route-field input, .model-route-field select { min-height: 40px; padding: 8px 11px; border: 1px solid #dfe6ef; border-radius: 20px; outline: 0; color: #263853; background: #fff; font-size: 12px; }
 .modal-field input:focus, .model-route-field input:focus, .model-route-field select:focus { border-color: #83b7f0; box-shadow: 0 0 0 3px #eef6ff; }
 .modal-field.wide { margin-bottom: 18px; }

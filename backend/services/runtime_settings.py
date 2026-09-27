@@ -8,6 +8,7 @@ from urllib.request import Request, urlopen
 
 from ..core.database import session
 from ..domain.repository import now_text
+from ..providers.http import resolve_generation_url
 from .secret_store import is_protected, protect_secret, storage_status, unprotect_secret
 
 
@@ -166,6 +167,8 @@ def test_provider_connection(payload: dict[str, Any]) -> dict[str, Any]:
     requested_endpoint = str(endpoint)
     if provider_kind == "llm":
         endpoint = _llm_models_endpoint(requested_endpoint)
+    elif provider_kind not in {"audio", "runninghub"}:
+        endpoint = resolve_generation_url(requested_endpoint, "image", payload.get("providerModel") or settings.get("providerModel"))
     headers = {"Accept": "application/json, audio/wav"}
     api_key = payload.get("llmApiKey") if provider_kind == "llm" else payload.get("providerApiKey")
     if api_key:
@@ -173,7 +176,7 @@ def test_provider_connection(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         request = Request(str(endpoint), headers=headers, method="GET")
         with urlopen(request, timeout=5) as response:
-            result: dict[str, Any] = {"ok": True, "status": "reachable", "message": f"{label} 已连接（HTTP {response.status}）", "endpoint": str(endpoint)}
+            result: dict[str, Any] = {"ok": True, "status": "reachable", "message": f"{label} 已连接（HTTP {response.status}）", "endpoint": str(endpoint), "requestedEndpoint": requested_endpoint}
             if provider_kind == "llm":
                 try:
                     body = json.loads(response.read().decode("utf-8"))

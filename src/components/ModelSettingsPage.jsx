@@ -101,6 +101,16 @@ function providerPayload(draft) {
   };
 }
 
+function generationEndpointPreview(draft) {
+  if (!draft?.url || draft.kind !== "media") return "";
+  const base = draft.url.replace(/\/+$/, "");
+  const lowered = base.toLowerCase();
+  if (lowered.endsWith("/images/generations") || lowered.endsWith("/image/generations") || lowered.endsWith("/videos/generations") || lowered.endsWith("/video/generations") || lowered.endsWith("/generate")) return base;
+  if (lowered.endsWith("/v1") && /(gpt-image|image-2|dall-e|flux|stable-diffusion|sdxl|sd3|qwen-image|kolors|midjourney)/.test(String(draft.defaultModel || "").toLowerCase())) return `${base}/images/generations`;
+  if (lowered.endsWith("/v1") && /(video|kling|seedance|wan2|vidu|runway|luma|hailuo)/.test(String(draft.defaultModel || "").toLowerCase())) return `${base}/videos/generations`;
+  return base;
+}
+
 function modelList(catalog) {
   return (catalog?.models || []).map((item) => item.modelId).filter(Boolean);
 }
@@ -165,7 +175,7 @@ function ModelServiceModal({ draft, catalog, busy, notice, onChange, onTest, onD
       <div className="model-modal-body">
         <label className="modal-field wide"><span>服务名称</span><input value={draft.name} onChange={(event) => onChange({ name: event.target.value })} placeholder="例如：DeepSeek 官方、公司中转 API" /></label>
         <div className="service-type-options"><button type="button" className={draft.kind === "llm" ? "is-selected" : ""} onClick={() => onChange({ kind: "llm", ...providerDraft({ llmProviderName: draft.name, llmProviderUrl: draft.url, llmModel: draft.defaultModel, llmVisionModel: draft.visionModel, llmApiKeySet: draft.apiKeySet }, "llm") })}><Sparkle size={18} /><strong>LLM / Agent</strong><small>文本、视觉与结构化输出</small></button><button type="button" className={draft.kind === "media" ? "is-selected" : ""} onClick={() => onChange({ kind: "media", ...providerDraft({ providerName: draft.name, providerUrl: draft.url, providerModel: draft.defaultModel, apiKeySet: draft.apiKeySet }, "media") })}><LinkSimple size={18} /><strong>图片 / 视频</strong><small>人物图、场景图与视频生成</small></button></div>
-        <div className="modal-field-grid"><label className="modal-field"><span>Base URL</span><input value={draft.url} onChange={(event) => onChange({ url: event.target.value })} placeholder={draft.kind === "llm" ? "https://api.openai.com/v1" : "https://api.example.com/v1/generate"} /></label><label className="modal-field"><span>API Key <i>仅保存在本机</i></span><input type="password" value={draft.apiKey} onChange={(event) => onChange({ apiKey: event.target.value })} placeholder={draft.apiKeySet ? "已保存密钥，留空保持不变" : "输入 API Key"} autoComplete="off" /></label></div>
+        <div className="modal-field-grid"><label className="modal-field"><span>{draft.kind === "media" ? "Base URL / 生成地址" : "Base URL"}</span><input value={draft.url} onChange={(event) => onChange({ url: event.target.value })} placeholder={draft.kind === "llm" ? "https://api.openai.com/v1" : "https://api.example.com/v1"} />{draft.kind === "media" && draft.url && <small className="endpoint-preview">实际提交：{generationEndpointPreview(draft)}</small>}</label><label className="modal-field"><span>API Key <i>仅保存在本机</i></span><input type="password" value={draft.apiKey} onChange={(event) => onChange({ apiKey: event.target.value })} placeholder={draft.apiKeySet ? "已保存密钥，留空保持不变" : "输入 API Key"} autoComplete="off" /></label></div>
         <div className="modal-actions"><button type="button" onClick={onTest} disabled={busy || !draft.url}><Check size={17} />测试连接</button><button type="button" onClick={onDiscover} disabled={busy || !draft.url}><ArrowsClockwise size={17} />{busy === "discover" ? "获取中…" : "获取模型"}</button><span>{busy === "test" ? "测试中…" : notice || "新配置未保存"}</span></div>
         <section className="model-routing-section"><div className="routing-heading"><div><span className="settings-kicker">MODEL ROUTING</span><h3>核心模型</h3><p>只需配置默认模型；视觉模型用于 QC 和图像理解。</p></div><strong>{catalog ? `已获取 ${catalog.count} 个模型` : "尚未获取目录"}</strong></div><div className="model-route-grid"><ModelPicker label="默认模型" value={draft.defaultModel} onChange={(value) => onChange({ defaultModel: value })} catalog={catalog} hint="Agent、文本或通用生成任务" />{draft.kind === "llm" && <ModelPicker label="视觉模型" value={draft.visionModel} onChange={(value) => onChange({ visionModel: value })} catalog={catalog} hint="支持图像输入的 VL / vision 模型" />}</div><CatalogPreview catalog={catalog} /></section>
         {draft.kind === "media" && <div className="modal-tip"><Sparkle size={17} /><span>通用图片/视频接口需要填写实际 POST 生成地址，不是网站首页。若返回 task_id，请在保存后补充异步状态地址。</span></div>}

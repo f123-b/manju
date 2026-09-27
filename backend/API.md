@@ -105,7 +105,7 @@ Short Drama OS 在服务端通过 `SHORT_DRAMA_PROVIDER_URL` 发起一个 JSON `
 
 服务端会每 2 秒轮询 `status_url`，直到返回 `Success`、`Failed` 或 `Cancelled`。完成后，视频地址会保存到镜头版本的 `outputUrl` 字段，任务状态会同步到“生成”页面。
 
-通用图片/视频 Provider 的地址必须是实际的 POST 生成接口，不是网站首页。图片响应兼容 `output_url`、`image_url`、`video_url`、`url`，以及 OpenAI 风格的 `data[0].url`；异步响应应返回 `task_id` 和 `status_url`，或者在设置中填写 `SHORT_DRAMA_PROVIDER_STATUS_URL` 模板。接口返回 200 但没有任何输出地址时，任务会标记为失败，不再回写本地占位图。
+通用图片/视频 Provider 的地址可以填写实际 POST 生成接口，也可以填写 OpenAI-compatible 的 `/v1` 基础地址：当默认模型包含 `gpt-image`、`dall-e`、`flux` 等图片模型时，系统会自动请求 `/v1/images/generations`；视频模型会自动尝试 `/v1/videos/generations`。图片响应兼容 `output_url`、`image_url`、`video_url`、`url`，以及 OpenAI 风格的 `data[0].url`；异步响应应返回 `task_id` 和 `status_url`，或者在设置中填写 `SHORT_DRAMA_PROVIDER_STATUS_URL` 模板。接口返回 200 但没有任何输出地址时，任务会标记为失败，不再回写本地占位图。
 
 视觉 QC 约定：默认执行本地图片解码、尺寸、画幅、曝光和角色绑定检查；当 `llmProviderUrl` 已配置时，`POST /api/shots/{shot_id}/qc` 和 `POST /api/projects/{project_id}/qc` 会向 OpenAI 兼容的 `/chat/completions` 发送结构化多模态请求。镜头图片会以本地 data URL 或远程 URL 放入 `image_url`，模型返回的 `vision_semantic` 结论会写入 `qc_records`，不会覆盖本地检查。
 
