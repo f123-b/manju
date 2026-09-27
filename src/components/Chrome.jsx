@@ -7,6 +7,7 @@ import {
   FilmSlate,
   FilmStrip,
   GearSix,
+  Graph,
   House,
   Images,
   MagnifyingGlass,
@@ -19,6 +20,7 @@ import {
 
 const navItems = [
   { label: "Agent", icon: Robot },
+  { label: "画布", icon: Graph },
   { label: "概览", icon: House },
   { label: "故事", icon: Note },
   { label: "剧集", icon: FilmStrip },

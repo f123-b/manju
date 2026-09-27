@@ -30,6 +30,144 @@ def loads(value: str | None, default):
         return default
 
 
+CANVAS_NODE_TYPES = {"text", "script", "image", "video", "audio", "agent", "asset"}
+
+DEFAULT_CANVAS_NODES = [
+    ("story", "text", "故事灵感", 120, 160, {"content": "从一句话灵感开始，逐步连接到脚本、分镜和生成任务。", "accent": "violet"}),
+    ("agent", "agent", "剧本 Agent", 440, 160, {"content": "读取故事圣经，生成剧集矩阵和可拍分镜。", "accent": "blue"}),
+    ("script", "script", "场景剧本", 760, 160, {"content": "把冲突拆成动作、对白和声音节拍。", "accent": "amber"}),
+    ("shot", "image", "镜头画面", 1080, 160, {"content": "生成角色一致的镜头画面。", "shotId": "SH041", "accent": "pink"}),
+    ("reference", "asset", "角色 / 场景参考", 120, 470, {"content": "拖入或选择已审核的角色、场景资产。", "accent": "green"}),
+    ("video", "video", "视频生成", 760, 470, {"content": "用画面和提示词生成视频片段。", "shotId": "SH041", "model": "mock-video", "accent": "cyan"}),
+    ("timeline", "audio", "时间线 / 音频", 1080, 470, {"content": "把视频、对白和声音送入时间线。", "accent": "slate"}),
+]
+
+
+def _ensure_canvas_seed(connection: sqlite3.Connection, project_id: str) -> None:
+    if connection.execute("SELECT 1 FROM canvas_nodes WHERE project_id = ? LIMIT 1", (project_id,)).fetchone():
+        return
+    ids: dict[str, str] = {}
+    for key, node_type, title, x, y, data in DEFAULT_CANVAS_NODES:
+        node_id = f"CN-{project_id}-{key}"
+        ids[key] = node_id
+        connection.execute(
+            "INSERT OR IGNORE INTO canvas_nodes(id, project_id, node_type, title, x, y, width, height, status, data_json) VALUES (?, ?, ?, ?, ?, ?, 280, 180, 'idle', ?)",
+            (node_id, project_id, node_type, title, x, y, dumps(data)),
+        )
+    for source, target, label in (("story", "agent", "上下文"), ("agent", "script", "结构化输出"), ("script", "shot", "镜头描述"), ("reference", "shot", "参考素材"), ("shot", "video", "首帧 / 提示词"), ("video", "timeline", "成片片段")):
+        connection.execute(
+            "INSERT OR IGNORE INTO canvas_edges(id, project_id, source_node_id, target_node_id, label) VALUES (?, ?, ?, ?, ?)",
+            (f"CE-{project_id}-{source}-{target}", project_id, ids[source], ids[target], label),
+        )
+
+
+def _canvas_node_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "projectId": row["project_id"],
+        "type": row["node_type"],
+        "title": row["title"],
+        "x": row["x"],
+        "y": row["y"],
+        "width": row["width"],
+        "height": row["height"],
+        "status": row["status"],
+        "data": loads(row["data_json"], {}),
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def _canvas_edge_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "projectId": row["project_id"],
+        "source": row["source_node_id"],
+        "target": row["target_node_id"],
+        "label": row["label"],
+        "createdAt": row["created_at"],
+    }
+
+
+def list_canvas(project_id: str) -> dict[str, Any]:
+    with session() as connection:
+        _project_row(connection, project_id)
+        _ensure_canvas_seed(connection, project_id)
+        nodes = connection.execute("SELECT * FROM canvas_nodes WHERE project_id = ? ORDER BY created_at, id", (project_id,)).fetchall()
+        edges = connection.execute("SELECT * FROM canvas_edges WHERE project_id = ? ORDER BY created_at, id", (project_id,)).fetchall()
+        return {"projectId": project_id, "nodes": [_canvas_node_dict(row) for row in nodes], "edges": [_canvas_edge_dict(row) for row in edges]}
+
+
+def create_canvas_node(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    node_type = str(payload.get("type") or payload.get("nodeType") or "text").lower()
+    if node_type not in CANVAS_NODE_TYPES:
+        raise ValueError(f"不支持的画布节点类型：{node_type}")
+    with session() as connection:
+        _project_row(connection, project_id)
+        node_id = new_id("CN-")
+        connection.execute(
+            """INSERT INTO canvas_nodes(id, project_id, node_type, title, x, y, width, height, status, data_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (node_id, project_id, node_type, str(payload.get("title") or "新节点"), float(payload.get("x", 120)), float(payload.get("y", 120)), float(payload.get("width", 280)), float(payload.get("height", 180)), str(payload.get("status") or "idle"), dumps(payload.get("data") or {})),
+        )
+        return _canvas_node_dict(connection.execute("SELECT * FROM canvas_nodes WHERE id = ?", (node_id,)).fetchone())
+
+
+def patch_canvas_node(node_id: str, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    allowed = {"title", "x", "y", "width", "height", "status", "data_json"}
+    values: list[tuple[str, Any]] = []
+    for key, value in payload.items():
+        database_key = "data_json" if key == "data" else key
+        if database_key not in allowed:
+            continue
+        if database_key == "data_json":
+            value = dumps(value)
+        values.append((database_key, value))
+    if not values:
+        raise ValueError("没有可更新的画布节点字段")
+    with session() as connection:
+        row = connection.execute("SELECT project_id FROM canvas_nodes WHERE id = ?", (node_id,)).fetchone()
+        if not row:
+            raise KeyError(f"canvas node {node_id} not found")
+        columns = ", ".join(f"{key} = ?" for key, _ in values)
+        connection.execute(f"UPDATE canvas_nodes SET {columns}, updated_at = ? WHERE id = ?", [value for _, value in values] + [now_text(), node_id])
+        return row["project_id"], _canvas_node_dict(connection.execute("SELECT * FROM canvas_nodes WHERE id = ?", (node_id,)).fetchone())
+
+
+def delete_canvas_node(node_id: str) -> str:
+    with session() as connection:
+        row = connection.execute("SELECT project_id FROM canvas_nodes WHERE id = ?", (node_id,)).fetchone()
+        if not row:
+            raise KeyError(f"canvas node {node_id} not found")
+        connection.execute("DELETE FROM canvas_nodes WHERE id = ?", (node_id,))
+        return row["project_id"]
+
+
+def create_canvas_edge(project_id: str, source_node_id: str, target_node_id: str, label: str = "") -> dict[str, Any]:
+    if source_node_id == target_node_id:
+        raise ValueError("画布节点不能连接到自身")
+    with session() as connection:
+        _project_row(connection, project_id)
+        nodes = connection.execute("SELECT id, project_id FROM canvas_nodes WHERE id IN (?, ?)", (source_node_id, target_node_id)).fetchall()
+        if len(nodes) != 2 or any(row["project_id"] != project_id for row in nodes):
+            raise KeyError("画布连接节点不存在")
+        edge_id = new_id("CE-")
+        try:
+            connection.execute("INSERT INTO canvas_edges(id, project_id, source_node_id, target_node_id, label) VALUES (?, ?, ?, ?, ?)", (edge_id, project_id, source_node_id, target_node_id, label))
+        except sqlite3.IntegrityError as error:
+            raise ValueError("这两个节点已经连接") from error
+        return _canvas_edge_dict(connection.execute("SELECT * FROM canvas_edges WHERE id = ?", (edge_id,)).fetchone())
+
+
+def delete_canvas_edge(edge_id: str) -> str:
+    with session() as connection:
+        row = connection.execute("SELECT project_id FROM canvas_edges WHERE id = ?", (edge_id,)).fetchone()
+        if not row:
+            raise KeyError(f"canvas edge {edge_id} not found")
+        connection.execute("DELETE FROM canvas_edges WHERE id = ?", (edge_id,))
+        return row["project_id"]
+
+
 def _project_row(connection: sqlite3.Connection, project_id: str):
     row = connection.execute("SELECT * FROM projects WHERE id = ? AND archived = 0", (project_id,)).fetchone()
     if not row:
@@ -489,16 +627,16 @@ def generation_task(task_id: str) -> dict[str, Any]:
     return {"id": row["id"], "shotId": row["shot_id"], "targetType": row["target_type"], "targetId": row["target_id"], "status": row["status"], "provider": row["provider"], "model": row["model"], "progress": row["progress"], "estimatedCost": row["estimated_cost"], "actualCost": row["actual_cost"], "retryCount": row["retry_count"], "error": row["error_message"], "createdAt": row["created_at"], "startedAt": row["started_at"], "completedAt": row["completed_at"], "parameters": loads(row["parameters_json"], {})}
 
 
-def create_generation_task(shot_id: str, prompt: str, provider: str, model: str, estimated_cost: float = 0.73, parameters: dict[str, Any] | None = None) -> tuple[str, str]:
+def create_generation_task(shot_id: str, prompt: str, provider: str, model: str, estimated_cost: float = 0.73, parameters: dict[str, Any] | None = None, task_type: str = "视频") -> tuple[str, str]:
     with session() as connection:
         context = _shot_context(connection, shot_id)
         if not context:
             raise KeyError(f"shot {shot_id} not found")
         task_id = new_id("T-")
         connection.execute(
-            """INSERT INTO generation_tasks(id, project_id, shot_id, target_type, target_id, provider, model, status, prompt, parameters_json, estimated_cost)
-            VALUES (?, ?, ?, 'shot', ?, ?, ?, 'Queued', ?, ?, ?)""",
-            (task_id, context["project_id"], shot_id, shot_id, provider, model, prompt, dumps(parameters or {}), estimated_cost),
+            """INSERT INTO generation_tasks(id, project_id, shot_id, target_type, target_id, type, provider, model, status, prompt, parameters_json, estimated_cost)
+            VALUES (?, ?, ?, 'shot', ?, ?, ?, ?, 'Queued', ?, ?, ?)""",
+            (task_id, context["project_id"], shot_id, shot_id, task_type, provider, model, prompt, dumps(parameters or {}), estimated_cost),
         )
         connection.execute("UPDATE shots SET status = '生成中', prompt = ?, updated_at = ? WHERE id = ?", (prompt, now_text(), shot_id))
         return context["project_id"], task_id

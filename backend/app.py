@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import os
 from urllib.parse import quote
 from typing import Any, Optional
@@ -10,11 +11,14 @@ from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
 from .core.config import DATA_DIR, DB_PATH, DIST_DIR, PROJECT_ID
-from .core.database import init_database
+from .core.database import init_database, session
 from .domain.repository import (
     activate_version,
     affected_shots,
     cancel_generation_task,
+    create_canvas_edge,
+    create_canvas_node,
+    create_target_generation_task,
     create_episode,
     create_asset,
     create_generation_task,
@@ -22,9 +26,12 @@ from .domain.repository import (
     create_scene,
     create_shot,
     delete_shot,
+    delete_canvas_edge,
+    delete_canvas_node,
     episode_dict,
     generation_task,
     list_costs,
+    list_canvas,
     list_models,
     list_projects,
     list_qc,
@@ -32,6 +39,7 @@ from .domain.repository import (
     list_shots_for_scene,
     list_versions,
     patch_asset,
+    patch_canvas_node,
     patch_episode,
     patch_project,
     patch_scene,
@@ -252,6 +260,114 @@ async def get_project_tasks(project_id: str, status: Optional[str] = None, targe
     if targetType:
         tasks = [item for item in tasks if item["targetType"] == targetType]
     return {"items": tasks[:max(1, min(int(limit), 500))]}
+
+
+@app.get("/api/projects/{project_id}/canvas")
+async def get_project_canvas(project_id: str) -> dict[str, Any]:
+    try:
+        return list_canvas(project_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/canvas/nodes")
+async def post_canvas_node(project_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        node = create_canvas_node(project_id, payload)
+        record_audit("canvas.node.created", "canvas_node", node["id"], {"type": node["type"]})
+        return {"node": node}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.patch("/api/canvas-nodes/{node_id}")
+async def patch_canvas_node_resource(node_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        project_id, node = patch_canvas_node(node_id, payload)
+        record_audit("canvas.node.updated", "canvas_node", node_id, {"keys": sorted(payload)})
+        return {"projectId": project_id, "node": node}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.delete("/api/canvas-nodes/{node_id}")
+async def delete_canvas_node_resource(node_id: str) -> dict[str, Any]:
+    try:
+        project_id = delete_canvas_node(node_id)
+        record_audit("canvas.node.deleted", "canvas_node", node_id)
+        return {"ok": True, "projectId": project_id}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/canvas/edges")
+async def post_canvas_edge(project_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        edge = create_canvas_edge(project_id, str(payload.get("source") or payload.get("sourceNodeId")), str(payload.get("target") or payload.get("targetNodeId")), str(payload.get("label") or ""))
+        record_audit("canvas.edge.created", "canvas_edge", edge["id"], {"source": edge["source"], "target": edge["target"]})
+        return {"edge": edge}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.delete("/api/canvas-edges/{edge_id}")
+async def delete_canvas_edge_resource(edge_id: str) -> dict[str, Any]:
+    try:
+        project_id = delete_canvas_edge(edge_id)
+        record_audit("canvas.edge.deleted", "canvas_edge", edge_id)
+        return {"ok": True, "projectId": project_id}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/canvas-nodes/{node_id}/run")
+async def run_canvas_node(node_id: str, payload: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+    with session() as connection:
+        row = connection.execute("SELECT * FROM canvas_nodes WHERE id = ?", (node_id,)).fetchone()
+    if not row:
+        raise not_found(f"canvas node {node_id} not found")
+    node = {
+        "id": row["id"],
+        "projectId": row["project_id"],
+        "type": row["node_type"],
+        "title": row["title"],
+        "data": json.loads(row["data_json"] or "{}"),
+    }
+    data = {**node["data"], **(payload.get("data") or {})}
+    prompt = str(payload.get("prompt") or data.get("prompt") or data.get("content") or node["title"])
+    try:
+        if node["type"] == "agent":
+            episode_id = data.get("episodeId") or project_response(node["projectId"])["currentEpisodeId"]
+            run = create_agent_run(node["projectId"], episode_id, prompt)
+            patch_canvas_node(node_id, {"status": "queued", "data": data})
+            task_engine.wake()
+            return {"kind": "agent", "run": run}
+        if node["type"] == "image":
+            if not data.get("assetType") or not data.get("assetId"):
+                raise ValueError("图片节点需要在右侧绑定 assetType 和 assetId")
+            provider = registry.summary()["providers"]["image"]
+            task_id = create_target_generation_task(node["projectId"], str(data["assetType"]), str(data["assetId"]), prompt, provider["provider"], provider["model"], float(payload.get("estimatedCost") or 0.18), {"assetType": data["assetType"], "canvasNodeId": node_id}, "图片")
+        elif node["type"] == "video":
+            shot_id = data.get("shotId")
+            if not shot_id:
+                raise ValueError("视频节点需要在右侧绑定 shotId")
+            provider = registry.summary()["providers"]["video"]
+            _project_id, task_id = create_generation_task(str(shot_id), prompt, provider["provider"], provider["model"], float(payload.get("estimatedCost") or 0.73), {"canvasNodeId": node_id}, "视频")
+        else:
+            raise ValueError("当前可执行节点为 Agent、图片和视频；文本与音频节点先作为工作流输入")
+        patch_canvas_node(node_id, {"status": "queued", "data": data})
+        task_engine.wake()
+        return {"kind": "task", "task": task_response(task_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
 
 
 @app.patch("/api/projects/{project_id}")

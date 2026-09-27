@@ -28,6 +28,34 @@ export function listRemoteTasks({ status, targetType, limit } = {}) {
   return request(`/projects/P001/tasks${query ? `?${query}` : ""}`).then((response) => response.items || []);
 }
 
+export function getRemoteCanvas() {
+  return request("/projects/P001/canvas");
+}
+
+export function createRemoteCanvasNode(payload) {
+  return request("/projects/P001/canvas/nodes", { method: "POST", body: JSON.stringify(payload) }).then((response) => response.node);
+}
+
+export function patchRemoteCanvasNode(nodeId, payload) {
+  return request(`/canvas-nodes/${nodeId}`, { method: "PATCH", body: JSON.stringify(payload) }).then((response) => response.node);
+}
+
+export function deleteRemoteCanvasNode(nodeId) {
+  return request(`/canvas-nodes/${nodeId}`, { method: "DELETE" });
+}
+
+export function createRemoteCanvasEdge(payload) {
+  return request("/projects/P001/canvas/edges", { method: "POST", body: JSON.stringify(payload) }).then((response) => response.edge);
+}
+
+export function deleteRemoteCanvasEdge(edgeId) {
+  return request(`/canvas-edges/${edgeId}`, { method: "DELETE" });
+}
+
+export function runRemoteCanvasNode(nodeId, payload = {}) {
+  return request(`/canvas-nodes/${nodeId}/run`, { method: "POST", body: JSON.stringify(payload) });
+}
+
 export function saveRemoteProject(project) {
   return request("/project", {
     method: "PUT",

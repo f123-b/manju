@@ -2,13 +2,18 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle, Sparkle } from "@phosphor-icons/react";
 import { Sidebar, Topbar } from "./components/Chrome.jsx";
 import { StoryboardWorkspace } from "./components/StoryboardWorkspace.jsx";
+import { CanvasPage } from "./components/CanvasPage.jsx";
 import { ModulePage, SearchDialog } from "./components/ModulePages.jsx";
 import {
   cancelRemoteTask,
+  createRemoteCanvasEdge,
+  createRemoteCanvasNode,
   createRemoteAsset,
   createRemoteScene,
   createRemoteShot,
   deleteRemoteShot,
+  deleteRemoteCanvasEdge,
+  deleteRemoteCanvasNode,
   exportRemoteProject,
   generateRemoteBreakdown,
   generateRemoteMatrix,
@@ -18,6 +23,7 @@ import {
   generateRemoteSceneScript,
   generateRemoteShot,
   getRemoteProviderSettings,
+  getRemoteCanvas,
   getRemoteAgentRun,
   listRemoteAgentRuns,
   getRemoteHealth,
@@ -50,6 +56,7 @@ import {
   patchRemoteCharacter,
   setRemoteCanonical,
   patchRemoteAsset,
+  patchRemoteCanvasNode,
   patchRemoteEpisode,
   patchRemoteProject,
   patchRemoteScene,
@@ -66,6 +73,7 @@ import {
   saveRemoteProject,
   saveRemoteProviderSettings,
   testRemoteProviderSettings,
+  runRemoteCanvasNode,
 } from "./apiClient.js";
 import {
   addShot,
@@ -497,6 +505,34 @@ export function App() {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return testRemoteProviderSettings(payload);
     },
+    getCanvas: () => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return getRemoteCanvas();
+    },
+    createCanvasNode: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteCanvasNode(payload);
+    },
+    patchCanvasNode: (nodeId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteCanvasNode(nodeId, payload);
+    },
+    deleteCanvasNode: (nodeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return deleteRemoteCanvasNode(nodeId);
+    },
+    createCanvasEdge: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteCanvasEdge(payload);
+    },
+    deleteCanvasEdge: (edgeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return deleteRemoteCanvasEdge(edgeId);
+    },
+    runCanvasNode: (nodeId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return runRemoteCanvasNode(nodeId, payload);
+    },
     startAgentRun: (payload) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return startRemoteAgentRun(payload);
@@ -694,7 +730,7 @@ export function App() {
       <Topbar project={project} onSearch={() => setSearchOpen(true)} />
       <div className="app-body">
         <Sidebar activeNav={activeNav} onNavigate={setActiveNav} />
-        <main className={`content-shell ${activeNav === "分镜" ? "storyboard-mode" : ""}`}>
+        <main className={`content-shell ${activeNav === "分镜" ? "storyboard-mode" : activeNav === "画布" ? "canvas-mode" : ""}`}>
           {activeNav === "分镜" ? (
             <StoryboardWorkspace
               project={project}
@@ -714,7 +750,7 @@ export function App() {
               onGenerate={generateShot}
               onEpisodeChange={changeEpisode}
             />
-          ) : <ModulePage activeNav={activeNav} project={project} stats={stats} actions={actions} />}
+          ) : activeNav === "画布" ? <CanvasPage project={project} actions={actions} /> : <ModulePage activeNav={activeNav} project={project} stats={stats} actions={actions} />}
         </main>
       </div>
       <SearchDialog open={searchOpen} project={project} onClose={() => setSearchOpen(false)} onOpenResult={openSearchResult} />

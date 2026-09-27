@@ -52,6 +52,14 @@ GET         /api/agent/runs/{run_id}
 POST        /api/agent/runs/{run_id}/resume
 POST        /api/agent/runs/{run_id}/cancel
 POST/GET    /api/episodes/{episode_id}/render(s)
+
+# Production Canvas
+GET         /api/projects/{project_id}/canvas
+POST        /api/projects/{project_id}/canvas/nodes
+PATCH/DELETE /api/canvas-nodes/{node_id}
+POST        /api/projects/{project_id}/canvas/edges
+DELETE      /api/canvas-edges/{edge_id}
+POST        /api/canvas-nodes/{node_id}/run
 ```
 
 生成任务会先写入 `generation_tasks` 的 `Queued` 状态，由独立后台 worker 领取；服务重启会把未完成的 `Running` 任务恢复为 `Queued`，不会依赖请求协程存活。`GET /api/projects/{project_id}/tasks` 会把图片、视频、音频、Agent 和 MP4 渲染任务统一成同一字段结构；渲染任务的 `targetType` 为 `render`，Provider 为 `local`，模型为 `FFmpeg`。
@@ -121,6 +129,8 @@ SHORT_DRAMA_LLM_API_KEY=
 适配器会自动请求 `/v1/chat/completions`，并在测试时读取 `/v1/models`。部分本地运行时不支持 `response_format`，系统会自动重试一次纯 JSON 请求；MiniMax 推理模型返回的 `<think>` 或 Markdown JSON 包裹也会自动清理。M2 系列主要用于 Agent 文本任务；视觉 QC 要使用本地支持图像输入的 MiniMax-VL 模型，否则系统仍会保留本地像素和连续性检查。
 
 Provider 和 LLM API Key 不会通过 API 返回明文。Windows 桌面预览使用当前用户 DPAPI 加密；非 Windows 开发环境使用 `data/.secret-key` 的本地密钥文件回退，文件已加入忽略列表。`/api/session` 和 `audit_events` 为后续多用户身份、权限和审计接入预留边界，当前预览版仍是本机单用户模式。
+
+生产画布使用 `canvas_nodes` 和 `canvas_edges` 持久化节点工作流。画布首次打开时会为项目创建故事灵感、剧本 Agent、场景剧本、角色/场景参考、镜头画面、视频生成和时间线/音频七个起始节点。节点可保存标题、内容、提示词、资产或镜头绑定、位置和执行状态；Agent、图片和视频节点可从画布直接进入现有 Agent 或统一生成任务队列，文本和音频节点先作为可连接的工作流输入。
 
 环境变量：
 
