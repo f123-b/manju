@@ -7,6 +7,7 @@ import mimetypes
 import re
 from pathlib import Path
 from typing import Any
+from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
 
@@ -44,18 +45,50 @@ class LLMProvider:
             "messages": messages,
             "response_format": {"type": "json_object"},
         }
-        request = Request(self._endpoint(), data=json.dumps(body, ensure_ascii=False).encode("utf-8"), headers=headers, method="POST")
-        with urlopen(request, timeout=120) as response:
-            payload = json.loads(response.read().decode("utf-8"))
-        content = ((payload.get("choices") or [{}])[0].get("message") or {}).get("content")
+
+        def send(request_body: dict[str, Any]) -> dict[str, Any]:
+            request = Request(self._endpoint(), data=json.dumps(request_body, ensure_ascii=False).encode("utf-8"), headers=headers, method="POST")
+            with urlopen(request, timeout=120) as response:
+                return json.loads(response.read().decode("utf-8"))
+
+        try:
+            payload = send(body)
+        except HTTPError as error:
+            # Some local OpenAI-compatible runtimes (including older vLLM
+            # builds) do not implement response_format. Retry once with the
+            # same prompt so MiniMax can still return structured JSON.
+            if error.code not in {400, 422}:
+                raise
+            payload = send({key: value for key, value in body.items() if key != "response_format"})
+
+        message = ((payload.get("choices") or [{}])[0].get("message") or {})
+        content = message.get("content")
+        if not content:
+            # Reasoning models may put their visible answer in a separate
+            # field. Prefer content, but keep this compatible with local
+            # MiniMax gateways that expose only reasoning_content.
+            content = message.get("reasoning_content")
         if isinstance(content, list):
             content = "".join(item.get("text", "") for item in content if isinstance(item, dict))
         if not content:
             content = payload.get("output") or payload.get("content") or payload
         if isinstance(content, dict):
             return content
-        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", str(content).strip())
-        result = json.loads(cleaned)
+
+        cleaned = str(content).strip()
+        # MiniMax reasoning models can wrap the JSON answer in a <think>
+        # block or Markdown fences. Remove those wrappers before parsing.
+        cleaned = re.sub(r"<think>.*?</think>", "", cleaned, flags=re.IGNORECASE | re.DOTALL).strip()
+        cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE).strip()
+        try:
+            result = json.loads(cleaned)
+        except json.JSONDecodeError:
+            # Be tolerant of a short natural-language prefix/suffix while
+            # preserving the structured object returned by the model.
+            start, end = cleaned.find("{"), cleaned.rfind("}")
+            if start < 0 or end <= start:
+                raise
+            result = json.loads(cleaned[start:end + 1])
         return result if isinstance(result, dict) else {"data": result}
 
     def _request(self, system: str, user: str) -> dict[str, Any]:

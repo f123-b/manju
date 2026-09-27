@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from typing import Any
 from urllib.error import HTTPError, URLError
@@ -43,6 +44,16 @@ DEFAULTS = {
 }
 
 SECRET_KEYS = {"providerApiKey", "llmApiKey"}
+
+
+def _llm_models_endpoint(endpoint: str) -> str:
+    """Normalize an OpenAI-compatible LLM URL to its model discovery route."""
+    value = endpoint.rstrip("/")
+    if value.endswith("/chat/completions"):
+        return value[: -len("/chat/completions")] + "/models"
+    if value.endswith("/models"):
+        return value
+    return f"{value}/models"
 
 
 def _raw_settings() -> dict[str, str]:
@@ -119,6 +130,9 @@ def test_provider_connection(payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "status": "not_configured", "message": "请先填写接口地址"}
     if not str(endpoint).startswith(("http://", "https://")):
         return {"ok": False, "status": "invalid", "message": "接口地址必须以 http:// 或 https:// 开头"}
+    requested_endpoint = str(endpoint)
+    if provider_kind == "llm":
+        endpoint = _llm_models_endpoint(requested_endpoint)
     headers = {"Accept": "application/json, audio/wav"}
     api_key = payload.get("llmApiKey") if provider_kind == "llm" else payload.get("providerApiKey")
     if api_key:
@@ -126,11 +140,21 @@ def test_provider_connection(payload: dict[str, Any]) -> dict[str, Any]:
     try:
         request = Request(str(endpoint), headers=headers, method="GET")
         with urlopen(request, timeout=5) as response:
-            return {"ok": True, "status": "reachable", "message": f"{label} 已连接（HTTP {response.status}）", "endpoint": str(endpoint)}
+            result: dict[str, Any] = {"ok": True, "status": "reachable", "message": f"{label} 已连接（HTTP {response.status}）", "endpoint": str(endpoint)}
+            if provider_kind == "llm":
+                try:
+                    body = json.loads(response.read().decode("utf-8"))
+                    models = [item.get("id") for item in body.get("data", []) if isinstance(item, dict) and item.get("id")]
+                    if models:
+                        result["models"] = models[:20]
+                        result["message"] = f"{label} 已连接，发现 {len(models)} 个模型"
+                except (ValueError, TypeError):
+                    pass
+            return result
     except HTTPError as error:
         # A synthesis endpoint commonly rejects GET but is still reachable.
         if error.code in {400, 401, 403, 404, 405, 422}:
-            return {"ok": True, "status": "reachable", "message": f"{label} 可访问（HTTP {error.code}，生成接口需 POST）", "endpoint": str(endpoint)}
-        return {"ok": False, "status": "http_error", "message": f"接口返回 HTTP {error.code}", "endpoint": str(endpoint)}
+            return {"ok": True, "status": "reachable", "message": f"{label} 可访问（HTTP {error.code}，生成接口需 POST）", "endpoint": str(endpoint), "requestedEndpoint": requested_endpoint}
+        return {"ok": False, "status": "http_error", "message": f"接口返回 HTTP {error.code}", "endpoint": str(endpoint), "requestedEndpoint": requested_endpoint}
     except (URLError, TimeoutError, OSError) as error:
-        return {"ok": False, "status": "unreachable", "message": f"连接失败：{error}", "endpoint": str(endpoint)}
+        return {"ok": False, "status": "unreachable", "message": f"连接失败：{error}", "endpoint": str(endpoint), "requestedEndpoint": requested_endpoint}

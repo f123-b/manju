@@ -3,6 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync, spawn } from "node:child_process";
+import { createServer } from "node:http";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -33,6 +34,19 @@ test("provider settings persist safely and test a configured endpoint", async (t
     server.kill();
     await rm(tempDir, { recursive: true, force: true });
   });
+
+  const localLlm = createServer((request, response) => {
+    if (request.method === "GET" && request.url === "/v1/models") {
+      const payload = JSON.stringify({ data: [{ id: "MiniMaxAI/MiniMax-M2.1" }] });
+      response.writeHead(200, { "content-type": "application/json" });
+      response.end(payload);
+      return;
+    }
+    response.writeHead(404, { "content-type": "application/json" });
+    response.end(JSON.stringify({ error: "not found" }));
+  });
+  await new Promise((resolve) => localLlm.listen(0, "127.0.0.1", resolve));
+  t.after(async () => new Promise((resolve) => localLlm.close(resolve)));
 
   const base = `http://127.0.0.1:${port}`;
   await waitForHealth(base);
@@ -91,6 +105,15 @@ test("provider settings persist safely and test a configured endpoint", async (t
   assert.equal(llmTestResponse.ok, true);
   assert.equal(llmTested.ok, true);
   assert.equal(llmTested.status, "reachable");
+
+  const localLlmTestResponse = await fetch(`${base}/api/settings/providers/test`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind: "llm", llmProviderUrl: `http://127.0.0.1:${localLlm.address().port}/v1`, llmProviderName: "MiniMax Local" }),
+  });
+  const localLlmTested = await localLlmTestResponse.json();
+  assert.equal(localLlmTestResponse.ok, true);
+  assert.deepEqual(localLlmTested.models, ["MiniMaxAI/MiniMax-M2.1"]);
 
   const clearResponse = await fetch(`${base}/api/settings/providers`, {
     method: "PATCH",

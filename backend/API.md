@@ -103,6 +103,23 @@ SHORT_DRAMA_LLM_MODEL=gpt-4o-mini
 SHORT_DRAMA_LLM_API_KEY=
 ```
 
+本地 MiniMax 可使用 vLLM 的 OpenAI-compatible 服务接入 Agent。建议把 vLLM 监听在 `8001`，避免和本应用 FastAPI 的 `8000` 冲突：
+
+```bash
+vllm serve MiniMaxAI/MiniMax-M2.1 --trust-remote-code --port 8001
+```
+
+然后在设置页选择“MiniMax M2.1 · 本地 vLLM”，或填写：
+
+```env
+SHORT_DRAMA_LLM_PROVIDER_URL=http://127.0.0.1:8001/v1
+SHORT_DRAMA_LLM_PROVIDER_NAME=MiniMax Local · vLLM
+SHORT_DRAMA_LLM_MODEL=MiniMaxAI/MiniMax-M2.1
+SHORT_DRAMA_LLM_API_KEY=
+```
+
+适配器会自动请求 `/v1/chat/completions`，并在测试时读取 `/v1/models`。部分本地运行时不支持 `response_format`，系统会自动重试一次纯 JSON 请求；MiniMax 推理模型返回的 `<think>` 或 Markdown JSON 包裹也会自动清理。M2 系列主要用于 Agent 文本任务；视觉 QC 要使用本地支持图像输入的 MiniMax-VL 模型，否则系统仍会保留本地像素和连续性检查。
+
 Provider 和 LLM API Key 不会通过 API 返回明文。Windows 桌面预览使用当前用户 DPAPI 加密；非 Windows 开发环境使用 `data/.secret-key` 的本地密钥文件回退，文件已加入忽略列表。`/api/session` 和 `audit_events` 为后续多用户身份、权限和审计接入预留边界，当前预览版仍是本机单用户模式。
 
 环境变量：
