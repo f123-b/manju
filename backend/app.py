@@ -244,6 +244,16 @@ async def get_project_resource(project_id: str) -> dict[str, Any]:
     return project_response(project_id)
 
 
+@app.get("/api/projects/{project_id}/tasks")
+async def get_project_tasks(project_id: str, status: Optional[str] = None, targetType: Optional[str] = None, limit: int = 100) -> dict[str, Any]:
+    tasks = project_response(project_id)["tasks"]
+    if status:
+        tasks = [item for item in tasks if item["status"] == status]
+    if targetType:
+        tasks = [item for item in tasks if item["targetType"] == targetType]
+    return {"items": tasks[:max(1, min(int(limit), 500))]}
+
+
 @app.patch("/api/projects/{project_id}")
 async def patch_project_resource(project_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     try:

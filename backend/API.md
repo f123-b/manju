@@ -6,6 +6,7 @@
 
 ```text
 GET/PATCH /api/projects/{project_id}
+GET       /api/projects/{project_id}/tasks
 GET/PATCH /api/projects/{project_id}/story-bible
 GET/POST   /api/projects/{project_id}/episodes
 GET/PATCH /api/episodes/{episode_id}
@@ -53,7 +54,7 @@ POST        /api/agent/runs/{run_id}/cancel
 POST/GET    /api/episodes/{episode_id}/render(s)
 ```
 
-生成任务会先写入 `generation_tasks` 的 `Queued` 状态，由独立后台 worker 领取；服务重启会把未完成的 `Running` 任务恢复为 `Queued`，不会依赖请求协程存活。
+生成任务会先写入 `generation_tasks` 的 `Queued` 状态，由独立后台 worker 领取；服务重启会把未完成的 `Running` 任务恢复为 `Queued`，不会依赖请求协程存活。`GET /api/projects/{project_id}/tasks` 会把图片、视频、音频、Agent 和 MP4 渲染任务统一成同一字段结构；渲染任务的 `targetType` 为 `render`，Provider 为 `local`，模型为 `FFmpeg`。
 
 Short Drama OS 在服务端通过 `SHORT_DRAMA_PROVIDER_URL` 发起一个 JSON `POST` 请求。
 

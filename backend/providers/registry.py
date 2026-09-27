@@ -21,6 +21,9 @@ class ProviderRegistry:
             "cosyvoiceUrl": os.environ.get("SHORT_DRAMA_COSYVOICE_URL") or os.environ.get("SHORT_DRAMA_VOICE_PROVIDER_URL", ""),
             "chatterboxUrl": os.environ.get("SHORT_DRAMA_CHATTERBOX_URL", ""),
             "gptSovitsUrl": os.environ.get("SHORT_DRAMA_GPTSOVITS_URL", ""),
+            "llmProviderUrl": os.environ.get("SHORT_DRAMA_LLM_PROVIDER_URL", ""),
+            "llmProviderName": os.environ.get("SHORT_DRAMA_LLM_PROVIDER_NAME", "OpenAI Compatible"),
+            "llmModel": os.environ.get("SHORT_DRAMA_LLM_MODEL", "gpt-4o-mini"),
         })
 
     def apply_settings(self, settings: dict[str, Any]) -> None:
@@ -35,6 +38,9 @@ class ProviderRegistry:
             "gpt-sovits": settings.get("gptSovitsUrl") or None,
         }
         self.voice_model = settings.get("voiceModel") or "voice-default"
+        self.llm_url = settings.get("llmProviderUrl") or None
+        self.llm_name = settings.get("llmProviderName") or "OpenAI Compatible"
+        self.llm_model = settings.get("llmModel") or "gpt-4o-mini"
 
     def reload(self) -> None:
         from ..services.runtime_settings import _raw_settings
@@ -52,10 +58,19 @@ class ProviderRegistry:
         return MockProvider(kind, model)
 
     def summary(self) -> dict[str, Any]:
+        image_video_provider = self.external_name if self.external_url else "Local Demo"
+        image_video_model = self.external_model if self.external_url else "mock-image/video"
+        audio_provider = self.voice_provider if any(self.voice_endpoints.values()) else "Local Demo"
         return {
             "mode": "remote" if self.external_url or any(self.voice_endpoints.values()) else "demo",
             "provider": self.external_name if self.external_url else (self.voice_provider if any(self.voice_endpoints.values()) else "Local Demo"),
             "configured": bool(self.external_url or any(self.voice_endpoints.values())),
             "types": ["text", "image", "video", "audio"],
             "voiceProviders": {key: bool(value) for key, value in self.voice_endpoints.items()},
+            "providers": {
+                "image": {"provider": image_video_provider, "model": image_video_model, "configured": bool(self.external_url)},
+                "video": {"provider": image_video_provider, "model": self.external_model if self.external_url else "mock-video", "configured": bool(self.external_url)},
+                "audio": {"provider": audio_provider, "model": self.voice_model, "configured": bool(any(self.voice_endpoints.values()))},
+                "llm": {"provider": self.llm_name if self.llm_url else "Local Agent", "model": self.llm_model, "configured": bool(self.llm_url)},
+            },
         }

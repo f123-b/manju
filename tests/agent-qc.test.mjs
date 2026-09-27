@@ -75,6 +75,10 @@ test("persistent agent runs and project visual QC can be resumed through the API
   assert.equal(assetTask.status, "Success");
   const afterAsset = await (await fetch(`${base}/api/projects/P001`)).json();
   assert.equal(afterAsset.assets.locations.find((item) => item.id === assetQueued.asset.id).status, "已生成");
+  const assetTasksResponse = await fetch(`${base}/api/projects/P001/tasks?targetType=asset`);
+  const assetTasks = await assetTasksResponse.json();
+  assert.equal(assetTasksResponse.ok, true);
+  assert.ok(assetTasks.items.some((item) => item.targetId === assetQueued.asset.id && item.provider));
   assert.ok(afterAsset.timeline.videoClips.length >= 1);
   const videoClip = afterAsset.timeline.videoClips[0];
   const patchVideoResponse = await fetch(`${base}/api/video-clips/${videoClip.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ timelineStartMs: 500, durationMs: 2500 }) });
@@ -122,6 +126,10 @@ test("persistent agent runs and project visual QC can be resumed through the API
     assert.match(mediaResponse.headers.get("content-type") || "", /video\/mp4/);
   }
   if (render.render.status === "blocked") assert.match(render.render.error, /FFmpeg/);
+  const renderTasksResponse = await fetch(`${base}/api/projects/P001/tasks?targetType=render`);
+  const renderTasks = await renderTasksResponse.json();
+  assert.equal(renderTasksResponse.ok, true);
+  assert.ok(renderTasks.items.some((item) => item.id === render.render.id && item.type === "渲染"));
 });
 
 test("configured LLM vision QC sends an image and persists semantic findings", async (t) => {

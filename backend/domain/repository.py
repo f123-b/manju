@@ -153,6 +153,7 @@ def project_to_dict(project_id: str) -> dict[str, Any]:
         locations = connection.execute("SELECT * FROM locations WHERE project_id = ? AND archived = 0 ORDER BY id", (project_id,)).fetchall()
         props = connection.execute("SELECT * FROM props WHERE project_id = ? AND archived = 0 ORDER BY id", (project_id,)).fetchall()
         tasks = connection.execute("SELECT * FROM generation_tasks WHERE project_id = ? ORDER BY created_at DESC", (project_id,)).fetchall()
+        render_jobs = connection.execute("SELECT * FROM render_jobs WHERE project_id = ? ORDER BY created_at DESC", (project_id,)).fetchall()
         audio_lines = list_dialogue_lines(project_id=project_id)
         audio_clips = list_audio_clips(project_id)
         audio_mixdowns = list_mixdowns(project_id)
@@ -218,7 +219,13 @@ def project_to_dict(project_id: str) -> dict[str, Any]:
                 },
             },
             "timeline": {"videoClips": video_clips},
-            "tasks": [{"id": item["id"], "shotId": item["shot_id"], "targetType": item["target_type"], "targetId": item["target_id"], "type": item["type"], "model": item["model"], "status": item["status"], "cost": round(float(item["actual_cost"] if item["actual_cost"] is not None else item["estimated_cost"]), 2), "createdAt": item["created_at"], "error": item["error_message"], "progress": item["progress"]} for item in tasks],
+            "tasks": [
+                {"id": item["id"], "shotId": item["shot_id"], "targetType": item["target_type"], "targetId": item["target_id"], "type": item["type"], "provider": item["provider"], "model": item["model"], "status": item["status"], "cost": round(float(item["actual_cost"] if item["actual_cost"] is not None else item["estimated_cost"]), 2), "createdAt": item["created_at"], "error": item["error_message"], "progress": item["progress"]}
+                for item in tasks
+            ] + [
+                {"id": item["id"], "shotId": None, "targetType": "render", "targetId": item["episode_id"], "type": "渲染", "provider": "local", "model": "FFmpeg", "status": {"queued": "Queued", "running": "Running", "ready": "Success", "failed": "Failed", "blocked": "Blocked"}.get(item["status"], item["status"]), "cost": 0, "createdAt": item["created_at"], "error": item["error_message"], "progress": 100 if item["status"] == "ready" else 0}
+                for item in render_jobs
+            ],
         }
 
 

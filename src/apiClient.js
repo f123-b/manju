@@ -19,6 +19,15 @@ export function getRemoteProject() {
   return request("/projects/P001");
 }
 
+export function listRemoteTasks({ status, targetType, limit } = {}) {
+  const params = new URLSearchParams();
+  if (status) params.set("status", status);
+  if (targetType) params.set("targetType", targetType);
+  if (limit) params.set("limit", String(limit));
+  const query = params.toString();
+  return request(`/projects/P001/tasks${query ? `?${query}` : ""}`).then((response) => response.items || []);
+}
+
 export function saveRemoteProject(project) {
   return request("/project", {
     method: "PUT",

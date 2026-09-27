@@ -473,7 +473,8 @@ export function App() {
     },
     renderEpisode: (episodeId) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
-      return renderRemoteEpisode(episodeId).then((render) => {
+      return renderRemoteEpisode(episodeId).then(async (render) => {
+        setProject(await getRemoteProject());
         if (render.status === "blocked") notify(render.error || "MP4 渲染环境未就绪", "error");
         else if (render.status === "ready") notify("MP4 已渲染完成");
         else notify(`MP4 渲染状态：${render.status}`);

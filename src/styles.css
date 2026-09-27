@@ -641,6 +641,7 @@ button { color: inherit; }
 .task-status { width: max-content; padding: 4px 7px; border-radius: 4px; color: #687589; background: #eff2f5; font-size: 9px; font-style: normal; }
 .task-status.Success { color: #298c5d; background: #e9f8f0; }
 .task-status.Failed { color: #c84851; background: #fff0f1; }
+.task-status.Blocked { color: #b67927; background: #fff4e5; }
 .task-status.Running { color: #2d73cd; background: #eaf3ff; }
 .task-status.Cancelled { color: #7a8594; background: #edf0f3; }
 .table-actions { display: flex; gap: 6px; }

@@ -44,6 +44,13 @@ test("provider settings persist safely and test a configured endpoint", async (t
   assert.equal(initial.settings.providerApiKey, "");
   assert.equal(initial.settings.secretStorage.encrypted, true);
 
+  const healthResponse = await fetch(`${base}/api/health`);
+  const health = await healthResponse.json();
+  assert.equal(healthResponse.ok, true);
+  assert.equal(health.providers.image.provider, "Local Demo");
+  assert.equal(health.providers.video.model, "mock-video");
+  assert.equal(health.providers.llm.configured, false);
+
   const sessionResponse = await fetch(`${base}/api/session`);
   const session = await sessionResponse.json();
   assert.equal(sessionResponse.ok, true);
