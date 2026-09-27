@@ -111,18 +111,22 @@ function generationEndpointPreview(draft) {
   return base;
 }
 
-function modelList(catalog) {
-  return (catalog?.models || []).map((item) => item.modelId).filter(Boolean);
+function modelList(catalog, category = "") {
+  return (catalog?.models || [])
+    .filter((item) => !category || item.categories?.includes(category) || item.type === category)
+    .map((item) => item.modelId)
+    .filter(Boolean);
 }
 
-function ModelPicker({ label, value, onChange, catalog, hint }) {
-  const models = modelList(catalog);
+function ModelPicker({ label, value, onChange, catalog, hint, category = "" }) {
+  const models = modelList(catalog, category);
+  const emptyPlaceholder = category === "vision" ? "未发现视觉模型，可留空" : "先获取模型，或手动填写模型 ID";
   return <label className="model-route-field">
     <span>{label}</span>
     {models.length ? <select value={value || ""} onChange={(event) => onChange(event.target.value)}>
       <option value="">选择模型</option>
       {models.map((model) => <option value={model} key={model}>{model}</option>)}
-    </select> : <input value={value || ""} onChange={(event) => onChange(event.target.value)} placeholder="先获取模型，或手动填写模型 ID" />}
+    </select> : <input value={value || ""} onChange={(event) => onChange(event.target.value)} placeholder={emptyPlaceholder} />}
     {hint && <small>{hint}</small>}
   </label>;
 }
@@ -177,7 +181,7 @@ function ModelServiceModal({ draft, catalog, busy, notice, onChange, onTest, onD
         <div className="service-type-options"><button type="button" className={draft.kind === "llm" ? "is-selected" : ""} onClick={() => onChange({ kind: "llm", ...providerDraft({ llmProviderName: draft.name, llmProviderUrl: draft.url, llmModel: draft.defaultModel, llmVisionModel: draft.visionModel, llmApiKeySet: draft.apiKeySet }, "llm") })}><Sparkle size={18} /><strong>LLM / Agent</strong><small>文本、视觉与结构化输出</small></button><button type="button" className={draft.kind === "media" ? "is-selected" : ""} onClick={() => onChange({ kind: "media", ...providerDraft({ providerName: draft.name, providerUrl: draft.url, providerModel: draft.defaultModel, apiKeySet: draft.apiKeySet }, "media") })}><LinkSimple size={18} /><strong>图片 / 视频</strong><small>人物图、场景图与视频生成</small></button></div>
         <div className="modal-field-grid"><label className="modal-field"><span>{draft.kind === "media" ? "Base URL / 生成地址" : "Base URL"}</span><input value={draft.url} onChange={(event) => onChange({ url: event.target.value })} placeholder={draft.kind === "llm" ? "https://api.openai.com/v1" : "https://api.example.com/v1"} />{draft.kind === "media" && draft.url && <small className="endpoint-preview">实际提交：{generationEndpointPreview(draft)}</small>}</label><label className="modal-field"><span>API Key <i>仅保存在本机</i></span><input type="password" value={draft.apiKey} onChange={(event) => onChange({ apiKey: event.target.value })} placeholder={draft.apiKeySet ? "已保存密钥，留空保持不变" : "输入 API Key"} autoComplete="off" /></label></div>
         <div className="modal-actions"><button type="button" onClick={onTest} disabled={busy || !draft.url}><Check size={17} />测试连接</button><button type="button" onClick={onDiscover} disabled={busy || !draft.url}><ArrowsClockwise size={17} />{busy === "discover" ? "获取中…" : "获取模型"}</button><span>{busy === "test" ? "测试中…" : notice || "新配置未保存"}</span></div>
-        <section className="model-routing-section"><div className="routing-heading"><div><span className="settings-kicker">MODEL ROUTING</span><h3>核心模型</h3><p>只需配置默认模型；视觉模型用于 QC 和图像理解。</p></div><strong>{catalog ? `已获取 ${catalog.count} 个模型` : "尚未获取目录"}</strong></div><div className="model-route-grid"><ModelPicker label="默认模型" value={draft.defaultModel} onChange={(value) => onChange({ defaultModel: value })} catalog={catalog} hint="Agent、文本或通用生成任务" />{draft.kind === "llm" && <ModelPicker label="视觉模型" value={draft.visionModel} onChange={(value) => onChange({ visionModel: value })} catalog={catalog} hint="支持图像输入的 VL / vision 模型" />}</div><CatalogPreview catalog={catalog} /></section>
+        <section className="model-routing-section"><div className="routing-heading"><div><span className="settings-kicker">MODEL ROUTING</span><h3>核心模型</h3><p>只需配置默认模型；视觉模型用于 QC 和图像理解。</p></div><strong>{catalog ? `已获取 ${catalog.count} 个模型` : "尚未获取目录"}</strong></div><div className="model-route-grid"><ModelPicker label="默认模型" value={draft.defaultModel} onChange={(value) => onChange({ defaultModel: value })} catalog={catalog} hint="Agent、文本或通用生成任务" />{draft.kind === "llm" && <ModelPicker label="视觉模型" value={draft.visionModel} onChange={(value) => onChange({ visionModel: value })} catalog={catalog} category="vision" hint="仅显示支持图像输入的 VL / vision 模型" />}</div><CatalogPreview catalog={catalog} /></section>
         {draft.kind === "media" && <div className="modal-tip"><Sparkle size={17} /><span>通用图片/视频接口需要填写实际 POST 生成地址，不是网站首页。若返回 task_id，请在保存后补充异步状态地址。</span></div>}
       </div>
       <footer className="model-modal-footer"><button type="button" onClick={onClose}>取消</button><button type="button" className="primary-action" onClick={onSave} disabled={busy || !draft.url}>{busy === "save" ? "保存中…" : "保存并设为当前"}<Plus size={17} /></button></footer>
@@ -229,7 +233,11 @@ export function ModelSettingsPage({ project, onUpdateProject, backendStatus, pro
     : settings.llmProviderUrl ? `LLM：${settings.llmProviderName}` : settings.providerUrl ? `生成：${settings.providerName}` : "未配置";
 
   const openService = (kind) => {
-    setDraft(providerDraft(settings, kind));
+    const nextDraft = providerDraft(settings, kind);
+    if (kind === "llm" && nextDraft.visionModel && catalogs.llm && !modelList(catalogs.llm, "vision").includes(nextDraft.visionModel)) {
+      nextDraft.visionModel = "";
+    }
+    setDraft(nextDraft);
     setModalNotice("");
   };
 
@@ -243,7 +251,13 @@ export function ModelSettingsPage({ project, onUpdateProject, backendStatus, pro
       const result = await actions.discoverModels({ kind: draft.kind === "llm" ? "llm" : "video", url: draft.url, apiKey: draft.apiKey, providerName: draft.name });
       setCatalogs((current) => ({ ...current, [draft.kind]: result }));
       const recommended = result.recommended || {};
-      setDraft((current) => ({ ...current, defaultModel: current.defaultModel || recommended.text || recommended.image || recommended.video || "", visionModel: current.visionModel || recommended.vision || "" }));
+      const allModels = modelList(result);
+      const visionModels = modelList(result, "vision");
+      setDraft((current) => ({
+        ...current,
+        defaultModel: current.defaultModel && allModels.includes(current.defaultModel) ? current.defaultModel : recommended.text || recommended.image || recommended.video || allModels[0] || "",
+        visionModel: current.kind === "llm" && current.visionModel && visionModels.includes(current.visionModel) ? current.visionModel : recommended.vision || "",
+      }));
       setModalNotice(`已发现 ${result.count} 个模型，并自动完成分类。`);
     } catch (error) {
       setModalNotice(error?.message || "模型目录读取失败，请确认接口支持 /models");

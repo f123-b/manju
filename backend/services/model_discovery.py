@@ -84,6 +84,20 @@ def _truthy_capabilities(raw: dict[str, Any]) -> set[str]:
     return values
 
 
+def _capability_values(raw: dict[str, Any], keys: tuple[str, ...]) -> set[str]:
+    """Read modality declarations without mixing input and output semantics."""
+    values: set[str] = set()
+    for key in keys:
+        value = raw.get(key)
+        if isinstance(value, dict):
+            values.update(str(item).lower() for item, enabled in value.items() if enabled)
+        elif isinstance(value, list):
+            values.update(str(item).lower() for item in value)
+        elif isinstance(value, str):
+            values.update(part.strip().lower() for part in value.replace(",", " ").split())
+    return values
+
+
 def _classify(raw: Any, requested_kind: str) -> dict[str, Any] | None:
     if isinstance(raw, str):
         model_id = raw
@@ -98,7 +112,13 @@ def _classify(raw: Any, requested_kind: str) -> dict[str, Any] | None:
 
     display_name = str(data.get("display_name") or data.get("displayName") or data.get("name") or model_id)
     capabilities = _truthy_capabilities(data)
-    haystack = f"{model_id} {display_name} {json.dumps(data, ensure_ascii=False, default=str)}".lower()
+    input_modalities = _capability_values(data, ("input_modalities", "inputModalities"))
+    output_modalities = _capability_values(data, ("output_modalities", "outputModalities"))
+    # Do not search the entire JSON record for words such as "image". Providers
+    # commonly expose an input modality alongside a text-only output modality,
+    # and arbitrary metadata can contain the same words. Classification should
+    # be driven by the model identity plus explicit capability fields.
+    haystack = f"{model_id} {display_name}".lower()
     categories: list[str] = []
 
     def add(category: str) -> None:
@@ -111,9 +131,13 @@ def _classify(raw: Any, requested_kind: str) -> dict[str, Any] | None:
         add("audio")
     if any(token in haystack for token in ("video", "text-to-video", "image-to-video", "kling", "seedance", "wan2", "wan-", "vidu", "runway", "luma", "hailuo", "cogvideo")) or capabilities & {"video"}:
         add("video")
-    if any(token in haystack for token in ("gpt-image", "image-2", "flux", "stable-diffusion", "sdxl", "sd3", "dall-e", "image-generation", "text-to-image", "qwen-image", "kolors", "midjourney", "playground", "comfy")) or capabilities & {"image", "image_generation"}:
+    image_output_markers = ("gpt-image", "image-2", "flux", "stable-diffusion", "sdxl", "sd3", "dall-e", "image-generation", "text-to-image", "qwen-image", "kolors", "midjourney", "playground", "comfy")
+    image_output_capabilities = {"image_generation", "image_output", "text_to_image"}
+    if any(token in haystack for token in image_output_markers) or bool(capabilities & image_output_capabilities) or bool(output_modalities & {"image", "image_generation", "image_output", "text_to_image"}):
         add("image")
-    if any(token in haystack for token in ("vision", "-vl", "_vl", "multimodal", "omni", "llava", "pixtral", "minicpm-v", "gpt-4o", "gemini")) or capabilities & {"vision", "image_input", "image understanding"}:
+    vision_markers = ("vision", "-vl", "_vl", "multimodal", "omni", "llava", "pixtral", "minicpm-v", "gpt-4o", "gemini")
+    vision_capabilities = {"vision", "image_input", "image understanding"}
+    if any(token in haystack for token in vision_markers) or capabilities & vision_capabilities or input_modalities & {"image", "vision"}:
         add("vision")
 
     if not categories:

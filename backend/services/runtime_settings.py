@@ -168,7 +168,7 @@ def test_provider_connection(payload: dict[str, Any]) -> dict[str, Any]:
     if provider_kind == "llm":
         endpoint = _llm_models_endpoint(requested_endpoint)
     elif provider_kind not in {"audio", "runninghub"}:
-        endpoint = resolve_generation_url(requested_endpoint, "image", payload.get("providerModel") or settings.get("providerModel"))
+        endpoint = resolve_generation_url(requested_endpoint, "image", payload.get("providerModel"))
     headers = {"Accept": "application/json, audio/wav"}
     api_key = payload.get("llmApiKey") if provider_kind == "llm" else payload.get("providerApiKey")
     if api_key:

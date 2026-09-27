@@ -33,6 +33,7 @@ test("discovers and classifies OpenAI-compatible models", async (t) => {
     response.setHeader("content-type", "application/json");
     response.end(JSON.stringify({ data: [
       { id: "MiniMaxAI/MiniMax-VL-01", capabilities: { text: true, vision: true } },
+      { id: "deepseek-flash", name: "DeepSeek-V4.1-Flash", input_modalities: ["text", "image"], output_modalities: ["text"] },
       { id: "gpt-image-2.5-flare" },
       { id: "gpt-6-sol" },
       { id: "black-forest-labs/FLUX.1-schnell" },
@@ -66,6 +67,8 @@ test("discovers and classifies OpenAI-compatible models", async (t) => {
   assert.deepEqual(payload.models.find((item) => item.modelId === "gpt-6-sol")?.type, "text");
   assert.deepEqual(payload.models.find((item) => item.modelId.includes("Wan2"))?.type, "video");
   assert.deepEqual(payload.models.find((item) => item.modelId.includes("MiniMax"))?.type, "vision");
+  assert.deepEqual(payload.models.find((item) => item.modelId === "deepseek-flash")?.type, "vision");
+  assert.equal(payload.models.find((item) => item.modelId === "deepseek-flash")?.capabilities.imageOutput, false);
   assert.deepEqual(payload.models.find((item) => item.modelId.includes("bge"))?.type, "embedding");
   assert.deepEqual(payload.groups.map((group) => group.type).sort(), ["embedding", "image", "text", "video", "vision"]);
 
