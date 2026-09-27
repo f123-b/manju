@@ -528,7 +528,7 @@ function ExportPage({ project, onExport }) {
 }
 
 function SettingsPage({ project, onUpdateProject, backendStatus, providerInfo, actions }) {
-  const [settings, setSettings] = useState({ providerUrl: "", providerName: "External Video API", providerModel: "video-default", providerApiKey: "", providerApiKeyMasked: "", apiKeySet: false, voiceProvider: "mock", voiceModel: "voice-default", cosyvoiceUrl: "", chatterboxUrl: "", gptSovitsUrl: "", llmProviderUrl: "", llmProviderName: "OpenAI Compatible", llmModel: "gpt-4o-mini", llmApiKey: "", llmApiKeyMasked: "", llmApiKeySet: false });
+  const [settings, setSettings] = useState({ providerUrl: "", providerName: "External Video API", providerModel: "video-default", providerApiKey: "", providerApiKeyMasked: "", apiKeySet: false, voiceProvider: "mock", voiceModel: "voice-default", cosyvoiceUrl: "", chatterboxUrl: "", gptSovitsUrl: "", llmProviderUrl: "", llmProviderName: "OpenAI Compatible", llmModel: "gpt-4o-mini", llmApiKey: "", llmApiKeyMasked: "", llmApiKeySet: false, secretStorage: null });
   const [settingsBusy, setSettingsBusy] = useState(false);
   const [settingsNotice, setSettingsNotice] = useState("");
   const providerLabel = providerInfo?.mode === "remote" ? `外部接口 · ${providerInfo.provider}` : providerInfo?.mode === "demo" ? "本地演示生成器" : "未连接";

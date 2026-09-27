@@ -22,6 +22,8 @@ GET       /api/projects/{project_id}/costs|qc
 POST      /api/projects/{project_id}/export
 GET/PATCH  /api/settings/providers
 POST       /api/settings/providers/test
+GET        /api/session
+GET        /api/audit-events
 
 # Audio Engine V1
 GET/POST   /api/characters/{character_id}/voice-profiles
@@ -99,6 +101,8 @@ SHORT_DRAMA_LLM_PROVIDER_NAME=OpenAI Compatible
 SHORT_DRAMA_LLM_MODEL=gpt-4o-mini
 SHORT_DRAMA_LLM_API_KEY=
 ```
+
+Provider 和 LLM API Key 不会通过 API 返回明文。Windows 桌面预览使用当前用户 DPAPI 加密；非 Windows 开发环境使用 `data/.secret-key` 的本地密钥文件回退，文件已加入忽略列表。`/api/session` 和 `audit_events` 为后续多用户身份、权限和审计接入预留边界，当前预览版仍是本机单用户模式。
 
 环境变量：
 

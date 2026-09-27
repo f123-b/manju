@@ -7,6 +7,7 @@ from urllib.request import Request, urlopen
 
 from ..core.database import session
 from ..domain.repository import now_text
+from .secret_store import is_protected, protect_secret, storage_status, unprotect_secret
 
 
 SETTING_ENV = {
@@ -41,12 +42,25 @@ DEFAULTS = {
     "llmApiKey": "",
 }
 
+SECRET_KEYS = {"providerApiKey", "llmApiKey"}
+
 
 def _raw_settings() -> dict[str, str]:
     values = {}
     with session() as connection:
         rows = connection.execute("SELECT key, value FROM runtime_settings").fetchall()
-        values.update({row["key"]: row["value"] for row in rows})
+        for row in rows:
+            key = row["key"]
+            stored = row["value"]
+            if key in SECRET_KEYS:
+                value = unprotect_secret(stored)
+                # Migrate V1 plaintext values as soon as the settings store is
+                # read, while keeping old installations usable.
+                if value and not is_protected(stored):
+                    connection.execute("UPDATE runtime_settings SET value = ?, is_secret = 1, updated_at = ? WHERE key = ?", (protect_secret(value), now_text(), key))
+                values[key] = value
+            else:
+                values[key] = stored
     for key, env_key in SETTING_ENV.items():
         if key not in values:
             values[key] = os.environ.get(env_key, DEFAULTS[key])
@@ -65,6 +79,7 @@ def public_provider_settings() -> dict[str, Any]:
         "llmApiKey": "",
         "llmApiKeyMasked": "••••••••" if has_llm_key else "",
         "llmApiKeySet": has_llm_key,
+        "secretStorage": storage_status(),
     }
 
 
@@ -75,10 +90,12 @@ def save_provider_settings(payload: dict[str, Any]) -> dict[str, Any]:
             if key not in payload:
                 continue
             value = payload.get(key)
-            if key in {"providerApiKey", "llmApiKey"} and value in {None, "", "••••••••"}:
+            if key in SECRET_KEYS and value in {None, "", "••••••••"}:
                 continue
             if value == "__CLEAR__":
                 value = ""
+            if key in SECRET_KEYS and value:
+                value = protect_secret(str(value))
             connection.execute(
                 "INSERT INTO runtime_settings(key, value, is_secret, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, is_secret = excluded.is_secret, updated_at = excluded.updated_at",
                 (key, str(value or ""), int(key in {"providerApiKey", "llmApiKey"}), now_text()),

@@ -91,6 +91,8 @@ def init_database() -> None:
         connection.executescript(render_migration.read_text(encoding="utf-8"))
         video_timeline_migration = ROOT / "backend" / "migrations" / "007_video_timeline.sql"
         connection.executescript(video_timeline_migration.read_text(encoding="utf-8"))
+        workspace_migration = ROOT / "backend" / "migrations" / "008_workspace_audit.sql"
+        connection.executescript(workspace_migration.read_text(encoding="utf-8"))
         connection.execute("UPDATE shot_characters SET id = 'SCB-' || lower(hex(randomblob(6))) WHERE id IS NULL")
         connection.execute("UPDATE shot_characters SET position = (SELECT COUNT(*) FROM shot_characters earlier WHERE earlier.shot_id = shot_characters.shot_id AND earlier.rowid <= shot_characters.rowid) - 1 WHERE position = 0")
         has_projects = connection.execute("SELECT 1 FROM projects LIMIT 1").fetchone()

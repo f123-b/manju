@@ -23,6 +23,11 @@ if (-not (Test-Path (Join-Path $projectRoot "dist/client/index.html"))) {
   if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 }
 
+$ffmpegCommand = Get-Command ffmpeg -ErrorAction SilentlyContinue
+if ($ffmpegCommand) {
+  $env:SHORT_DRAMA_FFMPEG = $ffmpegCommand.Source
+}
+
 $health = $null
 try { $health = Invoke-RestMethod "http://127.0.0.1:$port/api/health" -TimeoutSec 1 } catch { }
 if (-not $health) {
@@ -37,6 +42,12 @@ if (-not $health) {
       break
     } catch { }
   }
+}
+
+if (-not $health) {
+  Add-Type -AssemblyName PresentationFramework
+  [System.Windows.MessageBox]::Show("FastAPI did not start on port $port. Check Python dependencies or an existing process.", "Short Drama OS") | Out-Null
+  exit 1
 }
 
 $browserCandidates = @(

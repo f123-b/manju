@@ -2,9 +2,11 @@ node_modules/
 .npm-cache/
 dist/
 data/*.sqlite3
+data/.secret-key
 data/generated-audio/
 data/generated-video/
 .env
+desktop-artifacts/
 __pycache__/
 *.pyc
 .pytest_cache/

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -42,6 +42,13 @@ test("provider settings persist safely and test a configured endpoint", async (t
   assert.equal(initialResponse.ok, true);
   assert.equal(initial.settings.apiKeySet, false);
   assert.equal(initial.settings.providerApiKey, "");
+  assert.equal(initial.settings.secretStorage.encrypted, true);
+
+  const sessionResponse = await fetch(`${base}/api/session`);
+  const session = await sessionResponse.json();
+  assert.equal(sessionResponse.ok, true);
+  assert.equal(session.workspace.id, "local");
+  assert.equal(session.user.role, "owner");
 
   const saveResponse = await fetch(`${base}/api/settings/providers`, {
     method: "PATCH",
@@ -54,6 +61,9 @@ test("provider settings persist safely and test a configured endpoint", async (t
   assert.equal(saved.settings.providerApiKey, "");
   assert.equal(saved.settings.apiKeySet, true);
   assert.equal(saved.settings.providerApiKeyMasked, "••••••••");
+  const rawSecret = execFileSync("python", ["-c", "import os, sqlite3; print(sqlite3.connect(os.environ['TEST_DB']).execute(\"SELECT value FROM runtime_settings WHERE key='providerApiKey'\").fetchone()[0])"], { env: { ...process.env, TEST_DB: path.join(tempDir, "settings.sqlite3") }, encoding: "utf8" }).trim();
+  assert.doesNotMatch(rawSecret, /secret-value/);
+  assert.match(rawSecret, /^(dpapi|file):v1:/);
 
   const testResponse = await fetch(`${base}/api/settings/providers/test`, {
     method: "POST",
@@ -83,4 +93,9 @@ test("provider settings persist safely and test a configured endpoint", async (t
   const cleared = await clearResponse.json();
   assert.equal(clearResponse.ok, true);
   assert.equal(cleared.settings.apiKeySet, false);
+
+  const auditResponse = await fetch(`${base}/api/audit-events`);
+  const audit = await auditResponse.json();
+  assert.equal(auditResponse.ok, true);
+  assert.ok(audit.items.some((item) => item.action === "settings.updated"));
 });

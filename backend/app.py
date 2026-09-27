@@ -98,6 +98,7 @@ from .services.runtime_settings import _raw_settings, public_provider_settings, 
 from .services.agent_service import cancel_agent_run, create_agent_run, get_agent_run, list_agent_runs, resume_agent_run
 from .services.qc_service import run_project_continuity_check, run_project_qc, run_shot_visual_qc
 from .services.render_service import list_render_jobs, render_episode_mp4
+from .services.workspace_service import list_audit_events, record_audit, session_descriptor
 
 
 app = FastAPI(title="Short Drama OS API", version="1.0.0")
@@ -147,6 +148,16 @@ async def health() -> dict[str, Any]:
     return {"ok": True, "database": str(DB_PATH), "schemaVersion": 2, **registry.summary()}
 
 
+@app.get("/api/session")
+async def get_session_descriptor() -> dict[str, Any]:
+    return session_descriptor()
+
+
+@app.get("/api/audit-events")
+async def get_audit_events(limit: int = 50) -> dict[str, Any]:
+    return {"items": list_audit_events(limit)}
+
+
 @app.get("/api/settings/providers")
 async def get_provider_settings() -> dict[str, Any]:
     return {"settings": public_provider_settings()}
@@ -156,6 +167,8 @@ async def get_provider_settings() -> dict[str, Any]:
 async def patch_provider_settings(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     settings = save_provider_settings(payload)
     registry.reload()
+    changed_keys = [key for key, value in payload.items() if key not in {"providerApiKey", "llmApiKey"} or value not in (None, "", "••••••••")]
+    record_audit("settings.updated", "runtime_settings", metadata={"keys": sorted(changed_keys)})
     return {"settings": settings, "provider": registry.summary()}
 
 
@@ -173,6 +186,7 @@ async def post_provider_settings_test(payload: Optional[dict[str, Any]] = Body(d
 async def post_agent_run(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
     try:
         run = create_agent_run(payload.get("projectId", PROJECT_ID), payload.get("episodeId") or project_response(payload.get("projectId", PROJECT_ID))["currentEpisodeId"], payload.get("goal", ""))
+        record_audit("agent.started", "agent_run", run["id"], {"episodeId": run["episodeId"]})
         task_engine.wake()
         return {"run": run}
     except (KeyError, ValueError) as error:
@@ -197,6 +211,7 @@ async def list_agent_run_resources(project_id: str, episodeId: Optional[str] = N
 async def resume_agent_run_resource(run_id: str) -> dict[str, Any]:
     try:
         run = resume_agent_run(run_id)
+        record_audit("agent.resumed", "agent_run", run_id, {"episodeId": run["episodeId"]})
         task_engine.wake()
         return {"run": run}
     except KeyError as error:
@@ -473,7 +488,9 @@ async def post_asset(project_id: str, asset_type: str, payload: dict[str, Any] =
 @app.post("/api/projects/{project_id}/assets/generate")
 async def generate_asset(project_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
     try:
-        return await generate_asset_image(project_id, payload or {}, registry)
+        result = await generate_asset_image(project_id, payload or {}, registry)
+        record_audit("asset.generation_queued", "asset", result["asset"]["id"], {"taskId": result["taskId"], "assetType": result["assetType"]})
+        return result
     except KeyError as error:
         raise not_found(str(error)) from error
     except (RuntimeError, TimeoutError) as error:
@@ -653,7 +670,9 @@ async def post_episode_mixdown(episode_id: str, payload: Optional[dict[str, Any]
 @app.post("/api/episodes/{episode_id}/render")
 async def post_episode_render(episode_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
     try:
-        return {"render": await asyncio.to_thread(render_episode_mp4, episode_id, payload or {})}
+        render = await asyncio.to_thread(render_episode_mp4, episode_id, payload or {})
+        record_audit("timeline.rendered", "render_job", render["id"], {"episodeId": episode_id, "status": render["status"]})
+        return {"render": render}
     except KeyError as error:
         raise not_found(str(error)) from error
 
