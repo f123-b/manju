@@ -5,6 +5,7 @@ import json
 import zipfile
 
 from ..domain.repository import list_costs, list_models, list_qc, project_to_dict
+from .story_engine import story_snapshot
 
 
 def export_project_package(project_id: str) -> tuple[str, bytes]:
@@ -16,6 +17,7 @@ def export_project_package(project_id: str) -> tuple[str, bytes]:
 
         write_json("project.json", project)
         write_json("story-bible.json", project["storyBible"])
+        write_json("story-engine.json", story_snapshot(project_id))
         write_json("episodes.json", project["episodes"])
         write_json("shots.json", project["shots"])
         write_json("assets.json", project["assets"])

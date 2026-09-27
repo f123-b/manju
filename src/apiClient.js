@@ -163,6 +163,18 @@ export function patchRemoteStoryBible(patch) {
   return request("/projects/P001/story-bible", { method: "PATCH", body: JSON.stringify(patch) });
 }
 
+export function developRemoteStory(payload = {}) {
+  return request("/projects/P001/story/develop", { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function validateRemoteStory() {
+  return request("/projects/P001/story/validate", { method: "POST", body: JSON.stringify({}) });
+}
+
+export function getRemoteStoryEngine() {
+  return request("/projects/P001/story-engine");
+}
+
 export function patchRemoteShot(shotId, patch) {
   return request(`/shots/${shotId}`, { method: "PATCH", body: JSON.stringify(patch) });
 }

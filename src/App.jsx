@@ -84,6 +84,8 @@ import {
   runRemoteRunningHubWorkflow,
   uploadRemoteRunningHubFile,
   discoverRemoteModels,
+  developRemoteStory,
+  validateRemoteStory,
 } from "./apiClient.js";
 import {
   addShot,
@@ -260,6 +262,21 @@ export function App() {
       return generateRemoteMatrix(episodeId, payload).then((episode) => {
         setProject((current) => ({ ...current, episodes: current.episodes.map((item) => item.id === episodeId ? { ...item, ...episode } : item) }));
         return episode;
+      });
+    },
+    developStory: (payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return developRemoteStory(payload).then(async (result) => {
+        setProject(await getRemoteProject());
+        notify("Story Engine 已完成全剧策划");
+        return result;
+      });
+    },
+    validateStory: () => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return validateRemoteStory().then((result) => {
+        notify(`Story Quality：${result.score}`);
+        return result;
       });
     },
     createScene: (episodeId, payload) => {

@@ -133,7 +133,13 @@ async def _llm_step(step_key: str, context: dict[str, Any], settings: dict[str, 
     provider = LLMProvider(settings)
     if not provider.configured:
         return {}, "local-fallback"
-    schema = {"context": "{summary: string, goalSpec: {intent, episodeId, deliverables: [string], constraints: [string], requiresHumanReview: boolean}}", "matrix": "{data: {hook, coreEvent, payoff, twist, endingHook}}", "scene": "{data: {sceneId?, title, purpose, summary, timeOfDay}}", "script": "{data: {beats: [{type, text}], dialogue: [string], sound: string}}", "breakdown": "{data: {shots: [{description, size, duration, movement, dialogue}]}}"}[step_key]
+    schema = {
+        "context": "{summary: string, goalSpec: {intent, episodeId, deliverables: [string], constraints: [string], requiresHumanReview: boolean}}",
+        "matrix": "{data: {hook, coreEvent, payoff, twist, endingHook, beats:[{type,weight,setup,payoff}]}}",
+        "scene": "{data: {sceneId?, title, purpose, summary, timeOfDay}}",
+        "script": "{data: {summary, acceptanceCriteria:[string], flow:[{kind:'action',action}|{kind:'dialogue',speakerId,line,delivery}], sound:string}}",
+        "breakdown": "{data: {segments:[{blocking,soundscape,music,cuts:[{beatRefs,seconds,size,camera,characters,frame,shot,lens,cameraPosition,composition,eyeline,focus,stability}]}]}}",
+    }[step_key]
     system = "你是短剧制作 Agent。只返回合法 JSON，不要 Markdown。输出必须符合指定结构；内容必须继承故事圣经和不可违反规则。"
     user = json.dumps({"step": step_key, "expected": schema, "context": context}, ensure_ascii=False)
     return await provider.complete_json(system, user), provider.provider
@@ -157,7 +163,7 @@ def _fallback_step(step_key: str, context: dict[str, Any], data: dict[str, Any])
     scene = context.get("agentScene") or _fallback_step("scene", context, {})
     scene_id = data.get("sceneId") or scene["id"]
     if step_key == "script":
-        return generate_scene_script(scene_id, {"script": data} if data.get("beats") else data)
+        return generate_scene_script(scene_id, {"script": data} if data.get("flow") or data.get("beats") else data)
     return {"items": generate_shot_breakdown(scene_id, data)}
 
 

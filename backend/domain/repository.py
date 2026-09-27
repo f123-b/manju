@@ -297,6 +297,17 @@ def _shot_dict(connection: sqlite3.Connection, row: sqlite3.Row) -> dict[str, An
         "cost": round(float(row["cost"] or 0), 2),
         "stale": bool(row["stale"]) if "stale" in row.keys() else False,
         "staleReason": row["stale_reason"] if "stale_reason" in row.keys() else "",
+        "beatRefs": loads(row["beat_refs_json"], []) if "beat_refs_json" in row.keys() else [],
+        "cameraPosition": row["camera_position"] if "camera_position" in row.keys() else "",
+        "composition": row["composition"] if "composition" in row.keys() else "",
+        "eyeline": row["eyeline"] if "eyeline" in row.keys() else "",
+        "focus": row["focus"] if "focus" in row.keys() else "",
+        "stability": row["stability"] if "stability" in row.keys() else "stable",
+        "keyframePrompt": row["keyframe_prompt"] if "keyframe_prompt" in row.keys() else "",
+        "videoPrompt": row["video_prompt"] if "video_prompt" in row.keys() else "",
+        "sfx": row["sfx"] if "sfx" in row.keys() else "",
+        "lighting": row["lighting"] if "lighting" in row.keys() else "",
+        "segmentId": row["segment_id"] if "segment_id" in row.keys() else None,
         "characterIds": [item["character_id"] for item in characters],
         "outfitId": next((item["outfit_id"] for item in characters if item["outfit_id"]), None),
         "characterBindings": [
@@ -402,6 +413,13 @@ def project_to_dict(project_id: str) -> dict[str, Any]:
                 "mainLine": bible["main_line"] if bible else "", "theme": bible["theme"] if bible else "",
                 "ending": bible["ending"] if bible else "", "world": bible["world"] if bible else "",
                 "style": bible["style"] if bible else "", "rules": loads(bible["rules_json"], []) if bible else [],
+                "thematicQuestion": bible["thematic_question"] if bible and "thematic_question" in bible.keys() else "",
+                "genre": bible["genre"] if bible and "genre" in bible.keys() else "",
+                "tone": bible["tone"] if bible and "tone" in bible.keys() else "",
+                "audience": bible["audience"] if bible and "audience" in bible.keys() else "",
+                "platform": bible["platform"] if bible and "platform" in bible.keys() else "",
+                "structureType": bible["structure_type"] if bible and "structure_type" in bible.keys() else "",
+                "majorTurns": loads(bible["major_turns_json"], []) if bible and "major_turns_json" in bible.keys() else [],
             },
             "episodes": result_episodes,
             "currentScene": {
@@ -566,7 +584,7 @@ def patch_episode(episode_id: str, patch: dict[str, Any]) -> str:
 
 
 def patch_shot(shot_id: str, patch: dict[str, Any]) -> dict[str, Any]:
-    allowed = {"description": "description", "size": "shot_size", "frame": "frame", "lens": "lens", "angle": "camera_angle", "movement": "movement", "duration": "duration", "action": "action", "emotion": "emotion", "dialogue": "dialogue", "prompt": "prompt", "negativePrompt": "negative_prompt", "reviewed": "reviewed", "status": "status", "image": "image"}
+    allowed = {"description": "description", "size": "shot_size", "frame": "frame", "lens": "lens", "angle": "camera_angle", "movement": "movement", "duration": "duration", "action": "action", "emotion": "emotion", "dialogue": "dialogue", "prompt": "prompt", "negativePrompt": "negative_prompt", "reviewed": "reviewed", "status": "status", "image": "image", "cameraPosition": "camera_position", "composition": "composition", "eyeline": "eyeline", "focus": "focus", "stability": "stability", "keyframePrompt": "keyframe_prompt", "videoPrompt": "video_prompt", "sfx": "sfx", "lighting": "lighting", "segmentId": "segment_id"}
     values = [(allowed[key], int(value) if key == "reviewed" else value) for key, value in patch.items() if key in allowed]
     context = None
     with session() as connection:
@@ -653,7 +671,7 @@ def create_asset(project_id: str, asset_type: str, payload: dict[str, Any]) -> s
 def list_scenes(episode_id: str) -> list[dict[str, Any]]:
     with session() as connection:
         rows = connection.execute("SELECT * FROM scenes WHERE episode_id = ? AND archived = 0 ORDER BY order_index", (episode_id,)).fetchall()
-        return [{"id": row["id"], "episodeId": row["episode_id"], "order": row["order_index"], "title": row["title"], "locationId": row["location_id"], "timeOfDay": row["time_of_day"], "purpose": row["purpose"], "emotionStart": row["emotion_start"], "emotionEnd": row["emotion_end"], "summary": row["summary"], "estimatedDuration": row["estimated_duration"], "script": loads(row["script_json"], {})} for row in rows]
+        return [{"id": row["id"], "episodeId": row["episode_id"], "order": row["order_index"], "title": row["title"], "locationId": row["location_id"], "timeOfDay": row["time_of_day"], "purpose": row["purpose"], "emotionStart": row["emotion_start"], "emotionEnd": row["emotion_end"], "summary": row["summary"], "estimatedDuration": row["estimated_duration"], "script": loads(row["script_json"], {}), "acceptanceCriteria": loads(row["acceptance_criteria_json"], []) if "acceptance_criteria_json" in row.keys() else []} for row in rows]
 
 
 def create_scene(episode_id: str, payload: dict[str, Any]) -> str:
@@ -668,11 +686,11 @@ def create_scene(episode_id: str, payload: dict[str, Any]) -> str:
 
 
 def patch_scene(scene_id: str, patch: dict[str, Any]) -> str:
-    allowed = {"title": "title", "locationId": "location_id", "timeOfDay": "time_of_day", "purpose": "purpose", "emotionStart": "emotion_start", "emotionEnd": "emotion_end", "summary": "summary", "estimatedDuration": "estimated_duration", "script": "script_json"}
+    allowed = {"title": "title", "locationId": "location_id", "timeOfDay": "time_of_day", "purpose": "purpose", "emotionStart": "emotion_start", "emotionEnd": "emotion_end", "summary": "summary", "estimatedDuration": "estimated_duration", "script": "script_json", "acceptanceCriteria": "acceptance_criteria_json"}
     values = []
     for key, value in patch.items():
         if key in allowed:
-            values.append((allowed[key], dumps(value) if key == "script" else value))
+            values.append((allowed[key], dumps(value) if key in {"script", "acceptanceCriteria"} else value))
     with session() as connection:
         row = connection.execute("SELECT e.project_id FROM scenes s JOIN episodes e ON e.id = s.episode_id WHERE s.id = ? AND s.archived = 0", (scene_id,)).fetchone()
         if not row:

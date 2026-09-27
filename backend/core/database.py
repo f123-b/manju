@@ -75,6 +75,43 @@ def init_database() -> None:
             ("shot_characters", "continuity_overrides_json", "TEXT NOT NULL DEFAULT '{}'"),
             ("dependencies", "status", "TEXT NOT NULL DEFAULT 'active'"),
             ("dependencies", "stale_reason", "TEXT NOT NULL DEFAULT ''"),
+            ("story_bibles", "thematic_question", "TEXT NOT NULL DEFAULT ''"),
+            ("story_bibles", "genre", "TEXT NOT NULL DEFAULT ''"),
+            ("story_bibles", "tone", "TEXT NOT NULL DEFAULT ''"),
+            ("story_bibles", "audience", "TEXT NOT NULL DEFAULT ''"),
+            ("story_bibles", "platform", "TEXT NOT NULL DEFAULT ''"),
+            ("story_bibles", "structure_type", "TEXT NOT NULL DEFAULT ''"),
+            ("story_bibles", "major_turns_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("story_bibles", "character_map_json", "TEXT NOT NULL DEFAULT '{}'"),
+            ("characters", "story_tier", "TEXT NOT NULL DEFAULT 'support'"),
+            ("characters", "story_want", "TEXT NOT NULL DEFAULT ''"),
+            ("characters", "story_need", "TEXT NOT NULL DEFAULT ''"),
+            ("characters", "story_flaw", "TEXT NOT NULL DEFAULT ''"),
+            ("characters", "story_arc", "TEXT NOT NULL DEFAULT ''"),
+            ("characters", "speech_style", "TEXT NOT NULL DEFAULT ''"),
+            ("characters", "story_secrets_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("characters", "story_relationships_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("locations", "narrative_function", "TEXT NOT NULL DEFAULT ''"),
+            ("locations", "geography", "TEXT NOT NULL DEFAULT ''"),
+            ("locations", "visual_anchors_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("locations", "color_palette_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("locations", "materials_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("locations", "lighting_states_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("locations", "weather_states_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("props", "narrative_function", "TEXT NOT NULL DEFAULT ''"),
+            ("props", "continuity_states_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("scenes", "acceptance_criteria_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("shots", "beat_refs_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("shots", "camera_position", "TEXT NOT NULL DEFAULT ''"),
+            ("shots", "composition", "TEXT NOT NULL DEFAULT ''"),
+            ("shots", "eyeline", "TEXT NOT NULL DEFAULT ''"),
+            ("shots", "focus", "TEXT NOT NULL DEFAULT ''"),
+            ("shots", "stability", "TEXT NOT NULL DEFAULT 'stable'"),
+            ("shots", "keyframe_prompt", "TEXT NOT NULL DEFAULT ''"),
+            ("shots", "video_prompt", "TEXT NOT NULL DEFAULT ''"),
+            ("shots", "sfx", "TEXT NOT NULL DEFAULT ''"),
+            ("shots", "lighting", "TEXT NOT NULL DEFAULT ''"),
+            ("shots", "segment_id", "TEXT"),
         ):
             if not column_exists(connection, table, column):
                 connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
@@ -98,6 +135,8 @@ def init_database() -> None:
         connection.executescript(canvas_migration.read_text(encoding="utf-8"))
         runninghub_migration = ROOT / "backend" / "migrations" / "010_runninghub.sql"
         connection.executescript(runninghub_migration.read_text(encoding="utf-8"))
+        story_engine_migration = ROOT / "backend" / "migrations" / "011_story_engine.sql"
+        connection.executescript(story_engine_migration.read_text(encoding="utf-8"))
         connection.execute("UPDATE shot_characters SET id = 'SCB-' || lower(hex(randomblob(6))) WHERE id IS NULL")
         connection.execute("UPDATE shot_characters SET position = (SELECT COUNT(*) FROM shot_characters earlier WHERE earlier.shot_id = shot_characters.shot_id AND earlier.rowid <= shot_characters.rowid) - 1 WHERE position = 0")
         has_projects = connection.execute("SELECT 1 FROM projects LIMIT 1").fetchone()

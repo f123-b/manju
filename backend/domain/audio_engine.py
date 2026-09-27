@@ -305,26 +305,61 @@ def _line_row(connection, line_id: str):
 
 
 def extract_dialogue_lines(scene_id: str) -> list[dict[str, Any]]:
+    """Extract dialogue from the authoritative structured scene flow.
+
+    Visual shot bindings are not a reliable source of speaker attribution.
+    Legacy shot dialogue is used only when a shot has exactly one bound character.
+    """
     with session() as connection:
         scene = connection.execute("SELECT * FROM scenes WHERE id = ? AND archived = 0", (scene_id,)).fetchone()
         if not scene:
             raise KeyError(f"scene {scene_id} not found")
         episode = connection.execute("SELECT * FROM episodes WHERE id = ?", (scene["episode_id"],)).fetchone()
-        shots = connection.execute("SELECT * FROM shots WHERE scene_id = ? AND archived = 0 AND TRIM(dialogue) <> '' ORDER BY order_index", (scene_id,)).fetchall()
-        for shot in shots:
-            bindings = connection.execute("SELECT character_id FROM shot_characters WHERE shot_id = ? ORDER BY character_id", (shot["id"],)).fetchall()
-            for index, binding in enumerate(bindings):
-                existing = connection.execute("SELECT id FROM dialogue_lines WHERE shot_id = ? AND character_id = ?", (shot["id"], binding["character_id"])).fetchone()
+        script = loads(scene["script_json"], {})
+        flow = script.get("flow") if isinstance(script.get("flow"), list) else []
+        structured = [beat for beat in flow if isinstance(beat, dict) and beat.get("kind") == "dialogue" and str(beat.get("line") or "").strip()]
+        if structured:
+            for index, beat in enumerate(structured):
+                character_id = beat.get("speakerId")
+                if not character_id or not connection.execute("SELECT 1 FROM characters WHERE id = ? AND project_id = ?", (character_id, episode["project_id"])).fetchone():
+                    continue
+                text = str(beat.get("line") or "").strip()
+                order_index = (index + 1) * 100
+                existing = connection.execute(
+                    "SELECT id FROM dialogue_lines WHERE scene_id = ? AND order_index = ? AND character_id = ? AND text = ?",
+                    (scene_id, order_index, character_id, text),
+                ).fetchone()
                 if existing:
                     continue
-                profile = _profile_for_character(connection, binding["character_id"])
+                profile = _profile_for_character(connection, character_id)
+                line_id = new_id("DL-")
+                target = max(1000, int(len(text) / 4.5 * 1000))
+                connection.execute(
+                    "INSERT INTO dialogue_lines(id, project_id, episode_id, scene_id, shot_id, character_id, order_index, text, target_duration_ms, voice_profile_id) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, ?, ?)",
+                    (line_id, episode["project_id"], episode["id"], scene_id, character_id, order_index, text, target, profile["id"] if profile else None),
+                )
+                connection.execute(
+                    "INSERT INTO voice_performances(dialogue_line_id, target_duration_ms, delivery_instruction, source) VALUES (?, ?, ?, 'script-flow')",
+                    (line_id, target, beat.get("delivery", "")),
+                )
+        else:
+            shots = connection.execute("SELECT * FROM shots WHERE scene_id = ? AND archived = 0 AND TRIM(dialogue) <> '' ORDER BY order_index", (scene_id,)).fetchall()
+            for shot in shots:
+                bindings = connection.execute("SELECT character_id FROM shot_characters WHERE shot_id = ? ORDER BY position, character_id", (shot["id"],)).fetchall()
+                if len(bindings) != 1:
+                    continue
+                character_id = bindings[0]["character_id"]
+                existing = connection.execute("SELECT id FROM dialogue_lines WHERE shot_id = ? AND character_id = ?", (shot["id"], character_id)).fetchone()
+                if existing:
+                    continue
+                profile = _profile_for_character(connection, character_id)
                 target = int(shot["duration"] or 0) * 1000 or None
                 line_id = new_id("DL-")
                 connection.execute(
                     "INSERT INTO dialogue_lines(id, project_id, episode_id, scene_id, shot_id, character_id, order_index, text, target_duration_ms, voice_profile_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (line_id, episode["project_id"], episode["id"], scene_id, shot["id"], binding["character_id"], shot["order_index"] * 100 + index, shot["dialogue"], target, profile["id"] if profile else None),
+                    (line_id, episode["project_id"], episode["id"], scene_id, shot["id"], character_id, shot["order_index"] * 100, shot["dialogue"], target, profile["id"] if profile else None),
                 )
-                connection.execute("INSERT INTO voice_performances(dialogue_line_id, target_duration_ms, source) VALUES (?, ?, 'extracted')", (line_id, target))
+                connection.execute("INSERT INTO voice_performances(dialogue_line_id, target_duration_ms, source) VALUES (?, ?, 'legacy-shot')", (line_id, target))
         rows = connection.execute("SELECT * FROM dialogue_lines WHERE scene_id = ? ORDER BY order_index, created_at", (scene_id,)).fetchall()
         return [_line_dict(connection, row) for row in rows]
 
