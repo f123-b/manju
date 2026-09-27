@@ -38,10 +38,13 @@ POST       /api/voice-takes/{take_id}/activate|run-qc
 GET        /api/voice-providers
 GET/POST   /api/projects/{project_id}/audio-clips
 PATCH/DELETE /api/audio-clips/{clip_id}
+GET/POST   /api/projects/{project_id}/video-clips
+PATCH/DELETE /api/video-clips/{clip_id}
 POST        /api/projects/{project_id}/qc
 POST        /api/projects/{project_id}/continuity-check
 POST        /api/shots/{shot_id}/qc
 POST        /api/agent/runs
+GET         /api/projects/{project_id}/agent/runs
 GET         /api/agent/runs/{run_id}
 POST        /api/agent/runs/{run_id}/resume
 POST        /api/agent/runs/{run_id}/cancel

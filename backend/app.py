@@ -88,13 +88,14 @@ from .domain.audio_engine import (
     test_voice_profile,
     unlock_voice_profile,
 )
+from .domain.video_engine import create_video_clip, delete_video_clip, list_video_clips, patch_video_clip
 from .providers.registry import ProviderRegistry
 from .services.export_service import export_project_package
 from .services.asset_generation_service import generate_asset_image
 from .services.script_service import generate_episode_matrix, generate_scene_script, generate_shot_breakdown
 from .services.task_engine import task_engine
 from .services.runtime_settings import _raw_settings, public_provider_settings, save_provider_settings, test_provider_connection
-from .services.agent_service import cancel_agent_run, create_agent_run, get_agent_run, resume_agent_run
+from .services.agent_service import cancel_agent_run, create_agent_run, get_agent_run, list_agent_runs, resume_agent_run
 from .services.qc_service import run_project_continuity_check, run_project_qc, run_shot_visual_qc
 from .services.render_service import list_render_jobs, render_episode_mp4
 
@@ -184,6 +185,12 @@ async def get_agent_run_resource(run_id: str) -> dict[str, Any]:
         return {"run": get_agent_run(run_id)}
     except KeyError as error:
         raise not_found(str(error)) from error
+
+
+@app.get("/api/projects/{project_id}/agent/runs")
+async def list_agent_run_resources(project_id: str, episodeId: Optional[str] = None) -> dict[str, Any]:
+    project_response(project_id)
+    return {"items": list_agent_runs(project_id, episodeId)}
 
 
 @app.post("/api/agent/runs/{run_id}/resume")
@@ -413,6 +420,40 @@ async def patch_audio_clip_resource(clip_id: str, payload: dict[str, Any] = Body
 async def delete_audio_clip_resource(clip_id: str) -> dict[str, Any]:
     try:
         return delete_audio_clip(clip_id)
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.get("/api/projects/{project_id}/video-clips")
+async def get_project_video_clips(project_id: str, episodeId: Optional[str] = None) -> dict[str, Any]:
+    project_response(project_id)
+    return {"items": list_video_clips(project_id, episodeId)}
+
+
+@app.post("/api/projects/{project_id}/video-clips")
+async def post_project_video_clip(project_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return {"clip": create_video_clip(project_id, payload)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.patch("/api/video-clips/{clip_id}")
+async def patch_video_clip_resource(clip_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        return {"clip": patch_video_clip(clip_id, payload)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.delete("/api/video-clips/{clip_id}")
+async def delete_video_clip_resource(clip_id: str) -> dict[str, Any]:
+    try:
+        return delete_video_clip(clip_id)
     except KeyError as error:
         raise not_found(str(error)) from error
 

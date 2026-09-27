@@ -74,6 +74,17 @@ test("persistent agent runs and project visual QC can be resumed through the API
   assert.equal(assetTask.status, "Success");
   const afterAsset = await (await fetch(`${base}/api/projects/P001`)).json();
   assert.equal(afterAsset.assets.locations.find((item) => item.id === assetQueued.asset.id).status, "已生成");
+  assert.ok(afterAsset.timeline.videoClips.length >= 1);
+  const videoClip = afterAsset.timeline.videoClips[0];
+  const patchVideoResponse = await fetch(`${base}/api/video-clips/${videoClip.id}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ timelineStartMs: 500, durationMs: 2500 }) });
+  const patchedVideo = await patchVideoResponse.json();
+  assert.equal(patchVideoResponse.ok, true);
+  assert.equal(patchedVideo.clip.timelineStartMs, 500);
+  assert.equal(patchedVideo.clip.durationMs, 2500);
+  const removeVideoResponse = await fetch(`${base}/api/video-clips/${videoClip.id}`, { method: "DELETE" });
+  assert.equal(removeVideoResponse.ok, true);
+  const restoreVideoResponse = await fetch(`${base}/api/projects/P001/video-clips`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ shotId: videoClip.shotId }) });
+  assert.equal(restoreVideoResponse.ok, true);
 
   const runResponse = await fetch(`${base}/api/agent/runs`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ projectId: "P001", episodeId: "EP08", goal: "把这一集整理成可生成的连续镜头，并补齐对白" }) });
   const created = await runResponse.json();
@@ -82,11 +93,17 @@ test("persistent agent runs and project visual QC can be resumed through the API
   assert.equal(run.status, "success");
   assert.equal(run.steps.length, 5);
   assert.ok(run.steps.every((step) => step.status === "success"));
+  assert.ok(run.steps[0].output.goalSpec.deliverables.includes("shot_breakdown"));
+  const historyResponse = await fetch(`${base}/api/projects/P001/agent/runs?episodeId=EP08`);
+  const history = await historyResponse.json();
+  assert.equal(historyResponse.ok, true);
+  assert.equal(history.items[0].id, run.id);
 
   const qcResponse = await fetch(`${base}/api/projects/P001/qc`, { method: "POST" });
   const qc = await qcResponse.json();
   assert.equal(qcResponse.ok, true);
   assert.ok(qc.result.visual.length >= 1);
+  assert.ok(qc.result.visual[0].checks.some((check) => check.type === "visual_decode"));
   assert.ok(qc.result.continuity.findings.length >= 1);
 
   const continuityResponse = await fetch(`${base}/api/projects/P001/continuity-check`, { method: "POST" });
@@ -98,5 +115,10 @@ test("persistent agent runs and project visual QC can be resumed through the API
   const render = await renderResponse.json();
   assert.equal(renderResponse.ok, true);
   assert.ok(["ready", "blocked", "failed"].includes(render.render.status));
+  if (render.render.status === "ready") {
+    const mediaResponse = await fetch(`${base}${render.render.outputUrl}`);
+    assert.equal(mediaResponse.ok, true);
+    assert.match(mediaResponse.headers.get("content-type") || "", /video\/mp4/);
+  }
   if (render.render.status === "blocked") assert.match(render.render.error, /FFmpeg/);
 });

@@ -72,6 +72,20 @@ function AgentPage({ project, stats, actions }) {
     }
   };
 
+  useEffect(() => {
+    if (actions.backendStatus !== "online") return undefined;
+    let active = true;
+    actions.listAgentRuns(episodeId).then((runs) => {
+      if (!active || !runs[0]) return;
+      syncRun(runs[0]);
+      if (["queued", "running"].includes(runs[0].status)) {
+        setRunning(true);
+        pollAgent(runs[0].id);
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [actions.backendStatus, episodeId]);
+
   const runAgent = async () => {
     if (running || actions.backendStatus !== "online") return;
     setRunning(true);
@@ -100,6 +114,19 @@ function AgentPage({ project, stats, actions }) {
     }
   };
 
+  const resumeAgent = async () => {
+    if (!runId || running) return;
+    setRunning(true);
+    try {
+      const run = await actions.resumeAgentRun(runId);
+      syncRun(run);
+      pollAgent(run.id);
+    } catch (error) {
+      setRunning(false);
+      setResult(error?.message || "Agent 断点恢复失败");
+    }
+  };
+
   return <div className="module-page agent-page">
     <PageHeader eyebrow="Agent Control Center" title="剧本 Agent" description="用一句话下达制作目标，Agent 会读取上下文、调用 API，并把结果推进到可审核的镜头。" action={<span className={`agent-runtime ${actions.backendStatus}`}>{actions.backendStatus === "online" ? "FastAPI 已连接" : "等待 API"}</span>} />
     <div className="agent-layout">
@@ -108,7 +135,7 @@ function AgentPage({ project, stats, actions }) {
         <label className="agent-episode-field">工作剧集<select value={episodeId} onChange={(event) => { setEpisodeId(event.target.value); actions.updateProject({ currentEpisodeId: event.target.value }); }}><option value="">选择剧集</option>{project.episodes.map((item) => <option key={item.id} value={item.id}>{item.id}　{item.title}</option>)}</select></label>
         <label className="agent-goal-field"><span>制作目标</span><textarea value={goal} onChange={(event) => setGoal(event.target.value)} placeholder="例如：把 EP08 写成一场有反转的天台对峙，并拆成可生成镜头" /></label>
         <div className="agent-suggestions"><span>快速开始</span><button type="button" onClick={() => setGoal(`完成 ${episodeId} 的剧本到分镜流程`)}>完成本集到分镜</button><button type="button" onClick={() => setGoal(`为 ${episodeId} 补齐冲突升级和结尾钩子`)}>补齐本集节奏</button><button type="button" onClick={() => setGoal(`检查 ${episodeId} 的角色规则并修正镜头连续性`)}>检查连续性</button></div>
-        <div className="agent-command-footer"><span>{actions.backendStatus === "online" ? "Agent 会持久化每一步，服务重启后可以继续。" : "FastAPI 未连接，暂时不能执行 Agent 任务。"}</span><button className="primary-action" type="button" onClick={running ? stopAgent : runAgent} disabled={actions.backendStatus !== "online"}>{running ? <><Stop size={16} />停止 Agent</> : <><Play size={16} weight="fill" />开始执行</>}</button></div>
+        <div className="agent-command-footer"><span>{actions.backendStatus === "online" ? "Agent 会持久化每一步，服务重启后可以继续。" : "FastAPI 未连接，暂时不能执行 Agent 任务。"}</span><div className="agent-command-actions">{!running && runId && stepState.some((step) => step.status === "failed") && <button type="button" onClick={resumeAgent}>从断点继续</button>}<button className="primary-action" type="button" onClick={running ? stopAgent : runAgent} disabled={actions.backendStatus !== "online"}>{running ? <><Stop size={16} />停止 Agent</> : <><Play size={16} weight="fill" />开始执行</>}</button></div></div>
       </section>
       <section className="module-section agent-plan-card">
         <div className="section-heading"><div><h2>Agent 执行计划</h2><p>每一步都有结果，随时可以回到工作台人工接管。</p></div><span className="agent-plan-count">{stepState.filter((step) => step.status === "done").length} / {stepState.length}</span></div>
@@ -448,17 +475,26 @@ function TimelineClipEditor({ clip, onSave, onDelete }) {
   return <article className="timeline-clip-editor"><div><strong>{clip.linkedDialogueLineId || clip.id}</strong><small>{clip.trackType} · {clip.stale ? "需要重审" : "已入轨"}</small></div><label>起点 ms<input type="number" min="0" value={draft.timelineStartMs} onChange={(event) => update("timelineStartMs", Number(event.target.value))} /></label><label>时长 ms<input type="number" min="0" value={draft.durationMs} onChange={(event) => update("durationMs", Number(event.target.value))} /></label><label>增益 dB<input type="number" step="0.5" value={draft.gainDb} onChange={(event) => update("gainDb", Number(event.target.value))} /></label><button type="button" onClick={() => onSave(clip.id, draft)}>保存</button><button type="button" onClick={() => onDelete(clip.id)}>删除</button></article>;
 }
 
+function TimelineVideoClipEditor({ clip, onSave, onDelete }) {
+  const [draft, setDraft] = useState({ timelineStartMs: clip.timelineStartMs || 0, durationMs: clip.durationMs || 0 });
+  useEffect(() => setDraft({ timelineStartMs: clip.timelineStartMs || 0, durationMs: clip.durationMs || 0 }), [clip.id, clip.timelineStartMs, clip.durationMs]);
+  const update = (key, value) => setDraft((current) => ({ ...current, [key]: value }));
+  return <article className="timeline-clip-editor video-clip-editor"><div><strong>{clip.shotId}</strong><small>{clip.description || "视频镜头"} · {clip.stale ? "需要重审" : "可编辑"}</small></div><label>起点 ms<input type="number" min="0" value={draft.timelineStartMs} onChange={(event) => update("timelineStartMs", Number(event.target.value))} /></label><label>时长 ms<input type="number" min="1" value={draft.durationMs} onChange={(event) => update("durationMs", Number(event.target.value))} /></label><button type="button" onClick={() => onSave(clip.id, draft)}>保存</button><button type="button" onClick={() => onDelete(clip.id)}>移除</button></article>;
+}
+
 function TimelinePage({ project, actions }) {
   const [episodeId, setEpisodeId] = useState(project.currentEpisodeId);
   useEffect(() => setEpisodeId(project.currentEpisodeId), [project.currentEpisodeId]);
   const shots = project.shots.filter((shot) => shot.episodeId === episodeId);
-  const total = shots.reduce((sum, shot) => sum + shot.duration, 0) || 1;
+  const videoClips = (project.timeline?.videoClips || []).filter((clip) => clip.episodeId === episodeId);
+  const omittedShots = shots.filter((shot) => !videoClips.some((clip) => clip.shotId === shot.id));
+  const total = Math.max(shots.reduce((sum, shot) => sum + shot.duration, 0) * 1000, ...videoClips.map((clip) => (clip.timelineStartMs || 0) + (clip.durationMs || 0))) / 1000 || 1;
   const audioClips = (project.audio?.clips || []).filter((clip) => clip.episodeId === episodeId);
   const audioLines = (project.audio?.dialogueLines || []).filter((line) => line.episodeId === episodeId);
   const tracks = ["dialogue", "sfx", "ambience", "bgm"];
   const run = (operation, message) => operation().then(() => actions.notify?.(message)).catch((error) => actions.notify?.(error?.message || "时间线操作失败", "error"));
-  return <div className="module-page"><PageHeader eyebrow="Timeline" title={`${episodeId} 可编辑时间线`} description="选择剧集后直接调整音频片段的起点、时长和增益；保存会写回后台数据库。" action={<div className="page-header-actions"><select value={episodeId || ""} onChange={(event) => setEpisodeId(event.target.value)}>{project.episodes.map((episode) => <option key={episode.id} value={episode.id}>{episode.id} · {episode.title}</option>)}</select><button type="button" onClick={() => actions.mixdownEpisode(episodeId)}><SpeakerHigh size={17} />生成混音</button><button className="primary-action" type="button" onClick={() => actions.renderEpisode(episodeId)}>渲染 MP4</button></div>} />
-    <section className="module-section timeline-editor"><div className="timeline-ruler">{Array.from({ length: Math.ceil(total / 4) + 1 }, (_, index) => <span key={index}>{index * 4}s</span>)}</div><div className="timeline-track"><strong>Video</strong><div>{shots.map((shot) => <button key={shot.id} style={{ flex: Math.max(1, shot.duration) }} type="button"><img src={shot.image} alt="" /><span>{shot.id}</span><small>{shot.duration}s</small></button>)}</div></div>{tracks.map((track) => { const clips = audioClips.filter((clip) => clip.trackType === track); return <div className="timeline-track slim" key={track}><strong>{track === "dialogue" ? "Dialogue" : track.toUpperCase()}</strong><div>{clips.map((clip) => <div key={clip.id} style={{ flex: Math.max(1, (clip.durationMs || 1000) / 1000) }}><span>{clip.linkedDialogueLineId || `${track} clip`} · {Math.round((clip.durationMs || 0) / 1000)}s</span><TimelineClipEditor clip={clip} onSave={(id, patch) => run(() => actions.patchAudioClip(id, patch), "时间线片段已保存")} onDelete={(id) => run(() => actions.deleteAudioClip(id), "时间线片段已删除")} /></div>)}{!clips.length && <span className="timeline-empty-track">{track === "dialogue" ? `${audioLines.filter((line) => line.activeTake).length} 条可用对白，去声音工作台入轨` : "空轨道"}</span>}</div></div>; })}</section>
+  return <div className="module-page"><PageHeader eyebrow="Timeline" title={`${episodeId} 可编辑时间线`} description="视频镜头和音频片段都可以调整起点、时长与轨道状态；保存会写回后台数据库。" action={<div className="page-header-actions"><select value={episodeId || ""} onChange={(event) => setEpisodeId(event.target.value)}>{project.episodes.map((episode) => <option key={episode.id} value={episode.id}>{episode.id} · {episode.title}</option>)}</select><button type="button" onClick={() => actions.mixdownEpisode(episodeId)}><SpeakerHigh size={17} />生成混音</button><button className="primary-action" type="button" onClick={() => actions.renderEpisode(episodeId)}>渲染 MP4</button></div>} />
+    <section className="module-section timeline-editor"><div className="timeline-ruler">{Array.from({ length: Math.ceil(total / 4) + 1 }, (_, index) => <span key={index}>{index * 4}s</span>)}</div><div className="timeline-track"><strong>Video</strong><div>{videoClips.map((clip) => <div className="timeline-video-item" key={clip.id} style={{ flex: Math.max(1, (clip.durationMs || 1000) / 1000) }}><button type="button"><img src={clip.image || "/assets/shot-wide.png"} alt="" /><span>{clip.shotId}</span><small>{Math.round((clip.durationMs || 0) / 1000)}s</small></button><TimelineVideoClipEditor clip={clip} onSave={(id, patch) => run(() => actions.patchVideoClip(id, patch), "视频片段已保存")} onDelete={(id) => run(() => actions.deleteVideoClip(id), "视频片段已移除")} /></div>)}{!videoClips.length && <span className="timeline-empty-track">本集还没有视频片段</span>}</div></div>{omittedShots.length > 0 && <div className="timeline-add-clips"><span>未入轨镜头</span>{omittedShots.map((shot) => <button type="button" key={shot.id} onClick={() => run(() => actions.createVideoClip({ shotId: shot.id }), `${shot.id} 已恢复到视频轨道`)}>{shot.id} · 恢复</button>)}</div>}{tracks.map((track) => { const clips = audioClips.filter((clip) => clip.trackType === track); return <div className="timeline-track slim" key={track}><strong>{track === "dialogue" ? "Dialogue" : track.toUpperCase()}</strong><div>{clips.map((clip) => <div key={clip.id} style={{ flex: Math.max(1, (clip.durationMs || 1000) / 1000) }}><span>{clip.linkedDialogueLineId || `${track} clip`} · {Math.round((clip.durationMs || 0) / 1000)}s</span><TimelineClipEditor clip={clip} onSave={(id, patch) => run(() => actions.patchAudioClip(id, patch), "音频片段已保存")} onDelete={(id) => run(() => actions.deleteAudioClip(id), "音频片段已删除")} /></div>)}{!clips.length && <span className="timeline-empty-track">{track === "dialogue" ? `${audioLines.filter((line) => line.activeTake).length} 条可用对白，去声音工作台入轨` : "空轨道"}</span>}</div></div>; })}</section>
   </div>;
 }
 

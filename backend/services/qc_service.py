@@ -1,9 +1,49 @@
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
+from PIL import Image, ImageStat
+
+from ..core.config import DATA_DIR, ROOT
 from ..core.database import session
 from ..domain.repository import dumps, new_id, now_text
+
+
+def _local_image(url: str | None) -> Path | None:
+    if not url:
+        return None
+    if url.startswith("/assets/"):
+        candidate = (ROOT / "public" / url.lstrip("/")).resolve()
+    elif url.startswith("/generated-media/"):
+        name = Path(url).name
+        candidates = [DATA_DIR / "generated-video" / name, DATA_DIR / "generated-audio" / name]
+        candidate = next((item.resolve() for item in candidates if item.is_file()), candidates[0].resolve())
+    else:
+        candidate = Path(url).resolve()
+    return candidate if candidate.is_file() and (ROOT.resolve() in candidate.parents or DATA_DIR.resolve() in candidate.parents) else None
+
+
+def _image_checks(shot) -> list[dict[str, Any]]:
+    path = _local_image(shot["image"])
+    if not path:
+        return [{"type": "visual_decode", "score": 60, "severity": "warning", "message": "镜头图像来自外部地址，当前未缓存，跳过像素级检测", "metadata": {"image": shot["image"]}}]
+    try:
+        with Image.open(path) as image:
+            image.load()
+            width, height = image.size
+            brightness = round(float(ImageStat.Stat(image.convert("L")).mean[0]), 1)
+            ratio = width / max(height, 1)
+            expected_ratio = 16 / 9 if "16:9" in (shot["frame"] or "") else None
+            ratio_ok = expected_ratio is None or abs(ratio - expected_ratio) <= 0.08
+            return [
+                {"type": "visual_decode", "score": 100, "severity": "info", "message": "图像可解码", "metadata": {"width": width, "height": height, "mode": image.mode}},
+                {"type": "visual_dimensions", "score": 100 if width >= 512 and height >= 288 else 65, "severity": "info" if width >= 512 and height >= 288 else "warning", "message": f"图像尺寸 {width}×{height}", "metadata": {"width": width, "height": height}},
+                {"type": "visual_aspect", "score": 100 if ratio_ok else 65, "severity": "info" if ratio_ok else "warning", "message": "画幅比例符合镜头设置" if ratio_ok else "画幅比例与镜头设置不一致", "metadata": {"ratio": round(ratio, 4), "expected": expected_ratio}},
+                {"type": "visual_exposure", "score": 100 if 12 <= brightness <= 242 else 65, "severity": "info" if 12 <= brightness <= 242 else "warning", "message": f"平均亮度 {brightness}", "metadata": {"meanLuma": brightness}},
+            ]
+    except (OSError, ValueError) as error:
+        return [{"type": "visual_decode", "score": 0, "severity": "error", "message": f"图像解码失败：{error}", "metadata": {"path": str(path)}}]
 
 
 def _shot_row(connection, shot_id: str):
@@ -43,6 +83,7 @@ def run_shot_visual_qc(shot_id: str) -> dict[str, Any]:
             {"type": "visual_identity", "score": 100 if bindings and approved_refs >= len(bindings) else 70 if bindings else 50, "severity": "info" if bindings and approved_refs >= len(bindings) else "warning", "message": "角色参考已绑定" if bindings and approved_refs >= len(bindings) else "角色参考尚未全部审核或绑定", "metadata": {"bindings": len(bindings), "approvedReferences": approved_refs}},
             {"type": "visual_duration", "score": 100 if int(shot["duration"] or 0) > 0 else 0, "severity": "info" if int(shot["duration"] or 0) > 0 else "error", "message": "镜头时长有效" if int(shot["duration"] or 0) > 0 else "镜头时长必须大于 0", "metadata": {"duration": shot["duration"]}},
         ]
+        checks.extend(_image_checks(shot))
         score = round(sum(item["score"] for item in checks) / len(checks), 1)
         _save_checks(connection, shot_id, checks, score)
         return {"shotId": shot_id, "score": score, "status": "pass" if all(item["severity"] == "info" for item in checks) else "warning", "checks": checks}

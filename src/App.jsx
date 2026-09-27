@@ -19,6 +19,7 @@ import {
   generateRemoteShot,
   getRemoteProviderSettings,
   getRemoteAgentRun,
+  listRemoteAgentRuns,
   getRemoteHealth,
   getRemoteProject,
   getRemoteScenes,
@@ -30,6 +31,9 @@ import {
   createRemoteAudioClip,
   patchRemoteAudioClip,
   deleteRemoteAudioClip,
+  createRemoteVideoClip,
+  patchRemoteVideoClip,
+  deleteRemoteVideoClip,
   createRemoteVoiceProfile,
   directRemotePerformance,
   extractRemoteDialogueLines,
@@ -437,6 +441,28 @@ export function App() {
         return result;
       });
     },
+    createVideoClip: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteVideoClip(payload).then(async (clip) => {
+        setProject(await getRemoteProject());
+        return clip;
+      });
+    },
+    patchVideoClip: (clipId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteVideoClip(clipId, payload).then(async (clip) => {
+        setProject(await getRemoteProject());
+        return clip;
+      });
+    },
+    deleteVideoClip: (clipId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return deleteRemoteVideoClip(clipId).then(async (result) => {
+        setProject(await getRemoteProject());
+        notify("视频片段已移出时间线");
+        return result;
+      });
+    },
     mixdownEpisode: (episodeId) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return mixdownRemoteEpisode(episodeId).then(async (mixdown) => {
@@ -477,6 +503,10 @@ export function App() {
     getAgentRun: (runId) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return getRemoteAgentRun(runId);
+    },
+    listAgentRuns: (episodeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return listRemoteAgentRuns(episodeId);
     },
     resumeAgentRun: (runId) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));

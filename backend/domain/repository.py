@@ -132,6 +132,7 @@ def _asset_url(connection: sqlite3.Connection, asset_id: str | None) -> str | No
 def project_to_dict(project_id: str) -> dict[str, Any]:
     from .character_assets import character_dict
     from .audio_engine import list_audio_clips, list_dialogue_lines, list_mixdowns
+    from .video_engine import list_video_clips
 
     with session() as connection:
         project = _project_row(connection, project_id)
@@ -155,6 +156,7 @@ def project_to_dict(project_id: str) -> dict[str, Any]:
         audio_lines = list_dialogue_lines(project_id=project_id)
         audio_clips = list_audio_clips(project_id)
         audio_mixdowns = list_mixdowns(project_id)
+        video_clips = list_video_clips(project_id)
         current_scene = connection.execute(
             """
             SELECT s.* FROM scenes s JOIN episodes e ON e.id = s.episode_id
@@ -215,6 +217,7 @@ def project_to_dict(project_id: str) -> dict[str, Any]:
                     "stale": sum(1 for line in audio_lines if line.get("stale")),
                 },
             },
+            "timeline": {"videoClips": video_clips},
             "tasks": [{"id": item["id"], "shotId": item["shot_id"], "targetType": item["target_type"], "targetId": item["target_id"], "type": item["type"], "model": item["model"], "status": item["status"], "cost": round(float(item["actual_cost"] if item["actual_cost"] is not None else item["estimated_cost"]), 2), "createdAt": item["created_at"], "error": item["error_message"], "progress": item["progress"]} for item in tasks],
         }
 

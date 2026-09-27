@@ -34,6 +34,18 @@ def _json(value: Any) -> dict[str, Any]:
     return {}
 
 
+def _goal_spec(goal: str, episode_id: str, rules: list[str]) -> dict[str, Any]:
+    normalized = goal.strip()
+    deliverables: list[str] = []
+    keyword_map = [("剧本", "scene_script"), ("分镜", "shot_breakdown"), ("镜头", "shot_breakdown"), ("对白", "dialogue"), ("连续", "continuity_check"), ("角色", "character_consistency")]
+    for keyword, deliverable in keyword_map:
+        if keyword in normalized and deliverable not in deliverables:
+            deliverables.append(deliverable)
+    if not deliverables:
+        deliverables = ["scene_script", "shot_breakdown"]
+    return {"intent": normalized, "episodeId": episode_id, "deliverables": deliverables, "constraints": rules, "requiresHumanReview": True}
+
+
 def _run_dict(connection, run_id: str) -> dict[str, Any]:
     run = connection.execute("SELECT * FROM agent_runs WHERE id = ?", (run_id,)).fetchone()
     if not run:
@@ -53,6 +65,18 @@ def _run_dict(connection, run_id: str) -> dict[str, Any]:
 def get_agent_run(run_id: str) -> dict[str, Any]:
     with session() as connection:
         return _run_dict(connection, run_id)
+
+
+def list_agent_runs(project_id: str, episode_id: str | None = None, limit: int = 20) -> list[dict[str, Any]]:
+    with session() as connection:
+        values: list[Any] = [project_id]
+        where = "project_id = ?"
+        if episode_id:
+            where += " AND episode_id = ?"
+            values.append(episode_id)
+        values.append(max(1, min(int(limit), 100)))
+        rows = connection.execute(f"SELECT id FROM agent_runs WHERE {where} ORDER BY created_at DESC LIMIT ?", values).fetchall()
+        return [_run_dict(connection, row["id"]) for row in rows]
 
 
 def create_agent_run(project_id: str, episode_id: str, goal: str) -> dict[str, Any]:
@@ -109,7 +133,7 @@ async def _llm_step(step_key: str, context: dict[str, Any], settings: dict[str, 
     provider = LLMProvider(settings)
     if not provider.configured:
         return {}, "local-fallback"
-    schema = {"context": "{summary: string}", "matrix": "{data: {hook, coreEvent, payoff, twist, endingHook}}", "scene": "{data: {sceneId?, title, purpose, summary, timeOfDay}}", "script": "{data: {beats: [{type, text}], dialogue: [string], sound: string}}", "breakdown": "{data: {shots: [{description, size, duration, movement, dialogue}]}}"}[step_key]
+    schema = {"context": "{summary: string, goalSpec: {intent, episodeId, deliverables: [string], constraints: [string], requiresHumanReview: boolean}}", "matrix": "{data: {hook, coreEvent, payoff, twist, endingHook}}", "scene": "{data: {sceneId?, title, purpose, summary, timeOfDay}}", "script": "{data: {beats: [{type, text}], dialogue: [string], sound: string}}", "breakdown": "{data: {shots: [{description, size, duration, movement, dialogue}]}}"}[step_key]
     system = "你是短剧制作 Agent。只返回合法 JSON，不要 Markdown。输出必须符合指定结构；内容必须继承故事圣经和不可违反规则。"
     user = json.dumps({"step": step_key, "expected": schema, "context": context}, ensure_ascii=False)
     return await provider.complete_json(system, user), provider.provider
@@ -118,7 +142,7 @@ async def _llm_step(step_key: str, context: dict[str, Any], settings: dict[str, 
 def _fallback_step(step_key: str, context: dict[str, Any], data: dict[str, Any]) -> dict[str, Any]:
     episode_id = context["episode"]["id"]
     if step_key == "context":
-        return {"summary": "已读取故事圣经、规则、剧集和角色资产"}
+        return {"summary": "已读取故事圣经、规则、剧集和角色资产", "goalSpec": _goal_spec(context["goal"], episode_id, context["storyBible"].get("rules", []))}
     if step_key == "matrix":
         return generate_episode_matrix(episode_id, data)
     if step_key == "scene":
@@ -164,6 +188,8 @@ async def run_agent_task(task: dict[str, Any]) -> None:
             if step_key == "scene":
                 output["sceneId"] = output.get("id")
                 context["agentScene"] = output
+            if step_key == "context":
+                context["goalSpec"] = output.get("goalSpec") or _goal_spec(run["goal"], run["episodeId"], context["storyBible"].get("rules", []))
             with session() as connection:
                 connection.execute("UPDATE agent_steps SET status = 'success', output_json = ?, completed_at = ?, error_message = '' WHERE run_id = ? AND step_key = ?", (dumps(output), now_text(), run_id, step_key))
                 connection.execute("UPDATE generation_tasks SET progress = ? WHERE id = ?", (min(99, (index + 1) * 20), task["id"]))

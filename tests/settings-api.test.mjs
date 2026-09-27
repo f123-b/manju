@@ -65,6 +65,16 @@ test("provider settings persist safely and test a configured endpoint", async (t
   assert.equal(tested.ok, true);
   assert.equal(tested.status, "reachable");
 
+  const llmTestResponse = await fetch(`${base}/api/settings/providers/test`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ kind: "llm", llmProviderUrl: `${base}/api/health`, llmProviderName: "Test LLM", llmApiKey: "secret-llm" }),
+  });
+  const llmTested = await llmTestResponse.json();
+  assert.equal(llmTestResponse.ok, true);
+  assert.equal(llmTested.ok, true);
+  assert.equal(llmTested.status, "reachable");
+
   const clearResponse = await fetch(`${base}/api/settings/providers`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },

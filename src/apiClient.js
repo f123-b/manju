@@ -57,6 +57,11 @@ export function getRemoteAgentRun(runId) {
   return request(`/agent/runs/${runId}`).then((response) => response.run);
 }
 
+export function listRemoteAgentRuns(episodeId) {
+  const query = episodeId ? `?episodeId=${encodeURIComponent(episodeId)}` : "";
+  return request(`/projects/P001/agent/runs${query}`).then((response) => response.items || []);
+}
+
 export function resumeRemoteAgentRun(runId) {
   return request(`/agent/runs/${runId}/resume`, { method: "POST" }).then((response) => response.run);
 }
@@ -289,6 +294,18 @@ export function patchRemoteAudioClip(clipId, payload) {
 
 export function deleteRemoteAudioClip(clipId) {
   return request(`/audio-clips/${clipId}`, { method: "DELETE" });
+}
+
+export function createRemoteVideoClip(payload) {
+  return request("/projects/P001/video-clips", { method: "POST", body: JSON.stringify(payload) }).then((response) => response.clip);
+}
+
+export function patchRemoteVideoClip(clipId, payload) {
+  return request(`/video-clips/${clipId}`, { method: "PATCH", body: JSON.stringify(payload) }).then((response) => response.clip);
+}
+
+export function deleteRemoteVideoClip(clipId) {
+  return request(`/video-clips/${clipId}`, { method: "DELETE" });
 }
 
 export function mixdownRemoteEpisode(episodeId) {

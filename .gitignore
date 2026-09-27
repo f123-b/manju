@@ -3,6 +3,7 @@ node_modules/
 dist/
 data/*.sqlite3
 data/generated-audio/
+data/generated-video/
 .env
 __pycache__/
 *.pyc
