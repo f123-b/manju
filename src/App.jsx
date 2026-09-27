@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+const REMOTE_POLL_MAX_ATTEMPTS = 180;
 import { CheckCircle, Sparkle } from "@phosphor-icons/react";
 import { Sidebar, Topbar } from "./components/Chrome.jsx";
 import { StoryboardWorkspace } from "./components/StoryboardWorkspace.jsx";
@@ -87,24 +89,16 @@ import {
   addShot,
   addStoryRule,
   cancelTask as cancelProjectTask,
-  completeGeneration,
   duplicateShot,
   getProjectStats,
   loadProject,
   createEmptyProject,
-  queueGeneration,
   removeShot,
   removeStoryRule,
-  retryTask as retryProjectTask,
   saveProject,
   updateShot,
   updateStoryBible,
 } from "./projectStore.js";
-
-function formatTimestamp(date = new Date()) {
-  const pad = (value) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
-}
 
 function EmptyWorkspace({ backendStatus, busy, onCreate }) {
   return <div className="app-shell">
@@ -189,16 +183,7 @@ export function App() {
     operation.catch(() => setBackendStatus("offline"));
   }, []);
 
-  const scheduleCompletion = useCallback((taskId, shotId) => {
-    const timer = window.setTimeout(() => {
-      setProject((current) => completeGeneration(current, taskId, formatTimestamp()));
-      timers.current.delete(taskId);
-      notify(`${shotId} 已生成新版本`);
-    }, 2200);
-    timers.current.set(taskId, timer);
-  }, [notify]);
-
-  const pollRemoteGeneration = useCallback((taskId, shotId, attempt = 0, onComplete) => {
+  const pollRemoteGeneration = useCallback((taskId, shotId, attempt = 0, onComplete, onFailure) => {
     const timer = window.setTimeout(async () => {
       try {
         const remoteProject = await getRemoteProject();
@@ -211,12 +196,14 @@ export function App() {
           notify(`${shotId} 已生成新版本`);
           return;
         }
-        if (["Failed", "Cancelled"].includes(task?.status) || attempt >= 60) {
+        if (["Failed", "Cancelled"].includes(task?.status) || attempt >= REMOTE_POLL_MAX_ATTEMPTS) {
           timers.current.delete(taskId);
-          notify(`${shotId} 生成未完成，请在任务中心处理`, "error");
+          const failure = task || { status: "Failed", error: "任务轮询超时" };
+          onFailure?.(failure, remoteProject);
+          notify(failure.error ? `${shotId} 生成失败：${failure.error}` : `${shotId} 生成未完成，请在任务中心处理`, "error");
           return;
         }
-        pollRemoteGeneration(taskId, shotId, attempt + 1, onComplete);
+        pollRemoteGeneration(taskId, shotId, attempt + 1, onComplete, onFailure);
       } catch {
         timers.current.delete(taskId);
         setBackendStatus("offline");
@@ -227,23 +214,20 @@ export function App() {
   }, [notify]);
 
   const generateShot = useCallback(async (shotId, prompt) => {
-    if (backendStatus === "online") {
-      try {
-        setToast({ message: `正在生成 ${shotId}…`, type: "loading" });
-        const response = await generateRemoteShot({ shotId, prompt });
-        setProject(response.project);
-        pollRemoteGeneration(response.task.id, shotId);
-        return;
-      } catch {
-        setBackendStatus("offline");
-        notify("后台连接失败，已切换本地演示生成", "error");
-      }
+    if (backendStatus !== "online") {
+      notify("FastAPI 未连接，视频任务未生成", "error");
+      return;
     }
-    const taskId = `T${Date.now()}`;
-    setProject((current) => queueGeneration(current, shotId, prompt, taskId, formatTimestamp()));
-    setToast({ message: `正在生成 ${shotId}…`, type: "loading" });
-    scheduleCompletion(taskId, shotId);
-  }, [backendStatus, notify, pollRemoteGeneration, scheduleCompletion]);
+    try {
+      setToast({ message: `正在生成 ${shotId}…`, type: "loading" });
+      const response = await generateRemoteShot({ shotId, prompt });
+      setProject(response.project);
+      pollRemoteGeneration(response.task.id, shotId);
+    } catch (error) {
+      setBackendStatus("offline");
+      notify(error?.message || "视频生成接口请求失败，任务未生成", "error");
+    }
+  }, [backendStatus, notify, pollRemoteGeneration]);
 
   const actions = {
     notify,
@@ -282,7 +266,7 @@ export function App() {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return createRemoteScene(episodeId, payload);
     },
-    generateAsset: (assetType, payload, onComplete) => {
+    generateAsset: (assetType, payload, onComplete, onFailure) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return generateRemoteAsset(assetType, payload).then((response) => {
         const asset = response.asset;
@@ -295,7 +279,7 @@ export function App() {
               : [...current.assets[assetType], asset],
           },
         }));
-        if (response.taskId) pollRemoteGeneration(response.taskId, asset.id, 0, onComplete);
+        if (response.taskId) pollRemoteGeneration(response.taskId, asset.id, 0, onComplete, onFailure);
         return response;
       });
     },
@@ -671,11 +655,11 @@ export function App() {
     },
     addAsset: (type) => {
       const config = {
-        characters: { prefix: "C", name: "新角色", meta: "待完善", image: "/assets/shot-hero.png" },
-        locations: { prefix: "L", name: "新场景", meta: "待完善", image: "/assets/shot-wide.png" },
-        props: { prefix: "P", name: "新道具", meta: "待完善", image: "/assets/shot-woman.png" },
+        characters: { prefix: "C", name: "新角色", meta: "待完善" },
+        locations: { prefix: "L", name: "新场景", meta: "待完善" },
+        props: { prefix: "P", name: "新道具", meta: "待完善" },
       }[type];
-      const item = { id: nextAssetId(project.assets[type], config.prefix), name: config.name, meta: config.meta, description: "点击编辑资产描述。", image: config.image, status: "待确认" };
+      const item = { id: nextAssetId(project.assets[type], config.prefix), name: config.name, meta: config.meta, description: "点击编辑资产描述。", image: null, status: "待确认" };
       setProject((current) => ({ ...current, assets: { ...current.assets, [type]: [...current.assets[type], item] } }));
       if (backendStatus === "online") persist(createRemoteAsset(type, item));
       notify("已创建新资产");
@@ -705,10 +689,7 @@ export function App() {
         });
         return;
       }
-      const nextTaskId = `T${Date.now()}`;
-      setProject((current) => retryProjectTask(current, taskId, nextTaskId, formatTimestamp()));
-      setToast({ message: `正在重试 ${source.shotId}…`, type: "loading" });
-      scheduleCompletion(nextTaskId, source.shotId);
+      notify("FastAPI 未连接，无法重试视频任务", "error");
     },
     reviewShot: (shotId) => {
       const shot = project.shots.find((item) => item.id === shotId);

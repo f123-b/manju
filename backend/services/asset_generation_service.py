@@ -17,7 +17,7 @@ def _asset_payload(asset_type: str, payload: dict[str, Any], image: str | None =
         "name": payload.get("name") or ("新人物" if asset_type == "characters" else "新场景"),
         "meta": payload.get("meta") or ("人物参考" if asset_type == "characters" else "场景参考"),
         "description": payload.get("description") or prompt,
-        "image": image or ("/assets/shot-hero.png" if asset_type == "characters" else "/assets/shot-wide.png"),
+        "image": image,
         "prompt": prompt,
         "status": status,
     }

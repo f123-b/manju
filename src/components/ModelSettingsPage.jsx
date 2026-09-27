@@ -62,6 +62,15 @@ const CATEGORY_LABELS = {
   unknown: "未识别",
 };
 
+function isPlaceholderUrl(value) {
+  try {
+    const hostname = new URL(value).hostname.toLowerCase().replace(/\.$/, "");
+    return hostname === "example.com" || hostname === "api.example.com" || hostname.endsWith(".example.com");
+  } catch {
+    return false;
+  }
+}
+
 function providerDraft(settings, kind) {
   if (kind === "llm") {
     return {
@@ -153,7 +162,8 @@ function CatalogPreview({ catalog, compact = false }) {
 function ServiceCard({ kind, settings, catalog, active, onEdit, onDelete }) {
   const copy = SERVICE_COPY[kind];
   const Icon = copy.icon;
-  const configured = Boolean(kind === "llm" ? settings.llmProviderUrl : settings.providerUrl);
+  const configuredUrl = kind === "llm" ? settings.llmProviderUrl : settings.providerUrl;
+  const configured = Boolean(configuredUrl && !isPlaceholderUrl(configuredUrl));
   const name = kind === "llm" ? settings.llmProviderName : settings.providerName;
   const url = kind === "llm" ? settings.llmProviderUrl : settings.providerUrl;
   const model = kind === "llm" ? settings.llmModel : settings.providerModel;
@@ -180,18 +190,19 @@ function ServiceCard({ kind, settings, catalog, active, onEdit, onDelete }) {
 function ModelServiceModal({ draft, catalog, busy, notice, onChange, onTest, onDiscover, onSave, onClose }) {
   if (!draft) return null;
   const copy = SERVICE_COPY[draft.kind];
+  const placeholderUrl = isPlaceholderUrl(draft.url);
   return <div className="model-modal-backdrop" onMouseDown={onClose}>
     <section className="model-service-modal" onMouseDown={(event) => event.stopPropagation()}>
       <header className="model-modal-header"><div><span className="settings-kicker">NEW MODEL SERVICE</span><h2>{draft.url ? "编辑模型服务" : "添加模型服务"}</h2><p>填写接口信息，测试连接后获取模型目录；密钥只保存在本机安全存储。</p></div><button type="button" onClick={onClose} aria-label="关闭"><X size={22} /></button></header>
       <div className="model-modal-body">
         <label className="modal-field wide"><span>服务名称</span><input value={draft.name} onChange={(event) => onChange({ name: event.target.value })} placeholder="例如：DeepSeek 官方、公司中转 API" /></label>
         <div className="service-type-options"><button type="button" className={draft.kind === "llm" ? "is-selected" : ""} onClick={() => onChange({ kind: "llm", ...providerDraft({ llmProviderName: draft.name, llmProviderUrl: draft.url, llmModel: draft.defaultModel, llmVisionModel: draft.visionModel, llmApiKeySet: draft.apiKeySet }, "llm") })}><Sparkle size={18} /><strong>LLM / Agent</strong><small>文本、视觉与结构化输出</small></button><button type="button" className={draft.kind === "media" ? "is-selected" : ""} onClick={() => onChange({ kind: "media", ...providerDraft({ providerName: draft.name, providerUrl: draft.url, providerModel: draft.defaultModel, apiKeySet: draft.apiKeySet }, "media") })}><LinkSimple size={18} /><strong>图片 / 视频</strong><small>人物图、场景图与视频生成</small></button></div>
-        <div className="modal-field-grid"><label className="modal-field"><span>{draft.kind === "media" ? "Base URL / 生成地址" : "Base URL"}</span><input value={draft.url} onChange={(event) => onChange({ url: event.target.value })} placeholder={draft.kind === "llm" ? "https://api.openai.com/v1" : "https://api.example.com/v1"} />{draft.kind === "media" && draft.url && <small className="endpoint-preview">实际提交：{generationEndpointPreview(draft)}</small>}</label><label className="modal-field"><span>API Key <i>仅保存在本机</i></span><input type="password" value={draft.apiKey} onChange={(event) => onChange({ apiKey: event.target.value })} placeholder={draft.apiKeySet ? "已保存密钥，留空保持不变" : "输入 API Key"} autoComplete="off" /></label></div>
-        <div className="modal-actions"><button type="button" onClick={onTest} disabled={busy || !draft.url}><Check size={17} />测试连接</button><button type="button" onClick={onDiscover} disabled={busy || !draft.url}><ArrowsClockwise size={17} />{busy === "discover" ? "获取中…" : "获取模型"}</button><span>{busy === "test" ? "测试中…" : notice || "新配置未保存"}</span></div>
+        <div className="modal-field-grid"><label className="modal-field"><span>{draft.kind === "media" ? "Base URL / 生成地址" : "Base URL"}</span><input className={placeholderUrl ? "has-error" : ""} value={draft.url} onChange={(event) => onChange({ url: event.target.value })} placeholder={draft.kind === "llm" ? "https://api.openai.com/v1" : "https://api.example.com/v1"} />{placeholderUrl ? <small className="endpoint-error">这是示例占位地址，请替换为真实 API 地址。</small> : draft.kind === "media" && draft.url && <small className="endpoint-preview">实际提交：{generationEndpointPreview(draft)}</small>}</label><label className="modal-field"><span>API Key <i>仅保存在本机</i></span><input type="password" value={draft.apiKey} onChange={(event) => onChange({ apiKey: event.target.value })} placeholder={draft.apiKeySet ? "已保存密钥，留空保持不变" : "输入 API Key"} autoComplete="off" /></label></div>
+        <div className="modal-actions"><button type="button" onClick={onTest} disabled={busy || !draft.url || placeholderUrl}><Check size={17} />测试连接</button><button type="button" onClick={onDiscover} disabled={busy || !draft.url || placeholderUrl}><ArrowsClockwise size={17} />{busy === "discover" ? "获取中…" : "获取模型"}</button><span>{busy === "test" ? "测试中…" : notice || "新配置未保存"}</span></div>
         <section className="model-routing-section"><div className="routing-heading"><div><span className="settings-kicker">MODEL ROUTING</span><h3>核心模型</h3><p>{draft.kind === "media" ? "图片和视频分别选择模型，避免把图片模型提交到视频接口。" : "只需配置默认模型；视觉模型用于 QC 和图像理解。"}</p></div><strong>{catalog ? `已获取 ${catalog.count} 个模型` : "尚未获取目录"}</strong></div><div className="model-route-grid">{draft.kind === "media" ? <><ModelPicker label="图片模型" value={draft.imageModel || draft.defaultModel} onChange={(value) => onChange({ imageModel: value, defaultModel: value })} catalog={catalog} category="image" hint="用于人物图和场景图" /><ModelPicker label="视频模型" value={draft.videoModel} onChange={(value) => onChange({ videoModel: value })} catalog={catalog} category="video" hint="用于分镜视频生成；没有时可手动填写" /></> : <><ModelPicker label="默认模型" value={draft.defaultModel} onChange={(value) => onChange({ defaultModel: value })} catalog={catalog} hint="Agent、文本或通用生成任务" /><ModelPicker label="视觉模型" value={draft.visionModel} onChange={(value) => onChange({ visionModel: value })} catalog={catalog} category="vision" hint="仅显示支持图像输入的 VL / vision 模型" /></>}</div><CatalogPreview catalog={catalog} /></section>
         {draft.kind === "media" && <div className="modal-tip"><Sparkle size={17} /><span>通用图片/视频接口需要填写实际 POST 生成地址，不是网站首页。若返回 task_id，请在保存后补充异步状态地址。</span></div>}
       </div>
-      <footer className="model-modal-footer"><button type="button" onClick={onClose}>取消</button><button type="button" className="primary-action" onClick={onSave} disabled={busy || !draft.url}>{busy === "save" ? "保存中…" : "保存并设为当前"}<Plus size={17} /></button></footer>
+      <footer className="model-modal-footer"><button type="button" onClick={onClose}>取消</button><button type="button" className="primary-action" onClick={onSave} disabled={busy || !draft.url || placeholderUrl}>{busy === "save" ? "保存中…" : "保存并设为当前"}<Plus size={17} /></button></footer>
     </section>
   </div>;
 }
@@ -207,7 +218,7 @@ export function ModelSettingsPage({ project, onUpdateProject, backendStatus, pro
 
   const loadCatalog = async (kind, nextSettings = settings) => {
     const source = providerDraft(nextSettings, kind);
-    if (!source.url) return null;
+    if (!source.url || isPlaceholderUrl(source.url)) return null;
     try {
       const result = await actions.discoverModels({ kind: kind === "llm" ? "llm" : "video", url: source.url, apiKey: source.apiKey, providerName: source.name });
       setCatalogs((current) => ({ ...current, [kind]: result }));
@@ -233,11 +244,13 @@ export function ModelSettingsPage({ project, onUpdateProject, backendStatus, pro
     });
   }, [backendStatus]);
 
-  const configured = useMemo(() => [settings.llmProviderUrl, settings.providerUrl].filter(Boolean).length, [settings]);
+  const configured = useMemo(() => [settings.llmProviderUrl, settings.providerUrl].filter((url) => url && !isPlaceholderUrl(url)).length, [settings]);
   const modelCount = (catalogs.llm?.count || 0) + (catalogs.media?.count || 0);
-  const currentLabel = settings.llmProviderUrl && settings.providerUrl
+  const hasLLM = settings.llmProviderUrl && !isPlaceholderUrl(settings.llmProviderUrl);
+  const hasMedia = settings.providerUrl && !isPlaceholderUrl(settings.providerUrl);
+  const currentLabel = hasLLM && hasMedia
     ? `LLM：${settings.llmProviderName} · 生成：${settings.providerName}`
-    : settings.llmProviderUrl ? `LLM：${settings.llmProviderName}` : settings.providerUrl ? `生成：${settings.providerName}` : "未配置";
+    : hasLLM ? `LLM：${settings.llmProviderName}` : hasMedia ? `生成：${settings.providerName}` : "未配置";
 
   const openService = (kind) => {
     const nextDraft = providerDraft(settings, kind);
@@ -251,7 +264,10 @@ export function ModelSettingsPage({ project, onUpdateProject, backendStatus, pro
   const updateDraft = (patch) => setDraft((current) => ({ ...current, ...patch }));
 
   const discoverDraft = async () => {
-    if (!draft?.url) return;
+    if (!draft?.url || isPlaceholderUrl(draft.url)) {
+      setModalNotice("这是示例占位地址，请先替换为真实 API 地址。");
+      return;
+    }
     setBusy("discover");
     setModalNotice("");
     try {
@@ -281,7 +297,10 @@ export function ModelSettingsPage({ project, onUpdateProject, backendStatus, pro
   };
 
   const testDraft = async () => {
-    if (!draft?.url) return;
+    if (!draft?.url || isPlaceholderUrl(draft.url)) {
+      setModalNotice("这是示例占位地址，请先替换为真实 API 地址。");
+      return;
+    }
     setBusy("test");
     setModalNotice("");
     try {
@@ -296,7 +315,10 @@ export function ModelSettingsPage({ project, onUpdateProject, backendStatus, pro
   };
 
   const saveDraft = async () => {
-    if (!draft?.url) return;
+    if (!draft?.url || isPlaceholderUrl(draft.url)) {
+      setModalNotice("这是示例占位地址，不能保存。请替换为真实 API 地址。");
+      return;
+    }
     setBusy("save");
     try {
       const next = await actions.saveProviderSettings(providerPayload(draft));
@@ -336,12 +358,12 @@ export function ModelSettingsPage({ project, onUpdateProject, backendStatus, pro
     {backendStatus !== "online" && <div className="settings-inline-notice warning"><span>FastAPI 未连接，模型服务不能保存或测试。</span></div>}
     <section className="model-services-list">
       {loading ? <div className="model-settings-loading">正在读取模型服务…</div> : <>
-        <ServiceCard kind="llm" settings={settings} catalog={catalogs.llm} active={Boolean(settings.llmProviderUrl)} onEdit={() => openService("llm")} onDelete={() => deleteService("llm")} />
-        <ServiceCard kind="media" settings={settings} catalog={catalogs.media} active={Boolean(settings.providerUrl)} onEdit={() => openService("media")} onDelete={() => deleteService("media")} />
+        <ServiceCard kind="llm" settings={settings} catalog={catalogs.llm} active={Boolean(settings.llmProviderUrl && !isPlaceholderUrl(settings.llmProviderUrl))} onEdit={() => openService("llm")} onDelete={() => deleteService("llm")} />
+        <ServiceCard kind="media" settings={settings} catalog={catalogs.media} active={Boolean(settings.providerUrl && !isPlaceholderUrl(settings.providerUrl))} onEdit={() => openService("media")} onDelete={() => deleteService("media")} />
       </>}
     </section>
     <section className="module-section model-project-settings"><div><span className="settings-kicker">PROJECT</span><h2>项目基础信息</h2><p>与模型服务分开管理，避免配置页信息过载。</p></div><div className="project-settings-grid"><label>项目名称<input value={project.title} onChange={(event) => onUpdateProject({ title: event.target.value })} /></label><label>项目状态<select value={project.status} onChange={(event) => onUpdateProject({ status: event.target.value })}>{["策划中", "制作中", "审核中", "已完成"].map((item) => <option key={item}>{item}</option>)}</select></label><label>预算（元）<input type="number" min="0" value={project.budget} onChange={(event) => onUpdateProject({ budget: Number(event.target.value) })} /></label><label>计划完成日期<input type="date" value={project.dueDate} onChange={(event) => onUpdateProject({ dueDate: event.target.value })} /></label></div></section>
-    <section className="model-settings-runtime"><div><span className="settings-kicker">RUNTIME</span><h3>当前运行状态</h3><p>{backendStatus === "online" ? (providerInfo?.mode === "remote" ? "已配置外部 Provider，新任务会写入持久队列并由后台执行。" : "当前使用本地演示 Provider；配置服务后会自动切换。") : "FastAPI 未连接，生成任务无法同步到服务端。"}</p></div><strong>{providerInfo?.mode === "remote" ? "Remote" : "Local Demo"}</strong></section>
+    <section className="model-settings-runtime"><div><span className="settings-kicker">RUNTIME</span><h3>当前运行状态</h3><p>{backendStatus === "online" ? (providerInfo?.mode === "remote" ? "已配置外部 Provider，新任务会写入持久队列并由后台执行。" : "尚未配置真实图片/视频 Provider；提交生成后会明确记录失败，不会使用预设图片。") : "FastAPI 未连接，模型服务不能同步到服务端。"}</p></div><strong>{providerInfo?.mode === "remote" ? "Remote" : "未配置媒体 API"}</strong></section>
     {draft && <ModelServiceModal draft={draft} catalog={catalogs[draft.kind]} busy={busy} notice={modalNotice} onChange={updateDraft} onTest={testDraft} onDiscover={discoverDraft} onSave={saveDraft} onClose={() => setDraft(null)} />}
   </div>;
 }

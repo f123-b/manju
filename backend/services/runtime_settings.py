@@ -73,7 +73,7 @@ def _is_placeholder_url(value: str | None) -> bool:
     from urllib.parse import urlparse
 
     hostname = (urlparse(str(value or "")).hostname or "").lower().rstrip(".")
-    return hostname in {"blankapi.com", "example.com", "api.example.com"} or hostname.endswith(".example.com")
+    return hostname in {"example.com", "api.example.com"} or hostname.endswith(".example.com")
 
 
 def _raw_settings() -> dict[str, str]:
@@ -100,6 +100,11 @@ def _raw_settings() -> dict[str, str]:
 
 def public_provider_settings() -> dict[str, Any]:
     values = _raw_settings()
+    # The old demo endpoint must not look like a usable provider in the UI.
+    if _is_placeholder_url(values.get("providerUrl")):
+        values["providerUrl"] = ""
+    if _is_placeholder_url(values.get("llmProviderUrl")):
+        values["llmProviderUrl"] = ""
     has_key = bool(values.get("providerApiKey"))
     has_llm_key = bool(values.get("llmApiKey"))
     has_runninghub_key = bool(values.get("runninghubApiKey"))
@@ -119,6 +124,10 @@ def public_provider_settings() -> dict[str, Any]:
 
 
 def save_provider_settings(payload: dict[str, Any]) -> dict[str, Any]:
+    for key in ("providerUrl", "llmProviderUrl"):
+        value = payload.get(key)
+        if value and _is_placeholder_url(str(value)):
+            raise ValueError("这是示例占位地址，不能保存。请替换为真实可访问的 API 地址。")
     allowed = set(SETTING_ENV)
     with session() as connection:
         for key in allowed:
@@ -153,7 +162,7 @@ def test_provider_connection(payload: dict[str, Any]) -> dict[str, Any]:
             headers["Authorization"] = f"Bearer {api_key}"
         try:
             request = Request(str(endpoint).rstrip("/") + "/", headers=headers, method="GET")
-            with urlopen(request, timeout=5) as response:
+            with urlopen(request, timeout=20) as response:
                 return {"ok": True, "status": "reachable", "message": f"{label} 已连接（HTTP {response.status}）", "endpoint": str(endpoint)}
         except HTTPError as error:
             if error.code in {401, 403, 404, 405}:

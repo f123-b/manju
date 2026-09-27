@@ -64,7 +64,10 @@ class HttpProvider(BaseProvider):
             headers[self.auth_header] = f"{self.auth_prefix} {self.api_key}".strip()
         request = urllib.request.Request(url, data=json.dumps(payload or {}).encode("utf-8") if payload is not None else None, headers=headers, method=method or ("POST" if payload is not None else "GET"))
         try:
-            with urllib.request.urlopen(request, timeout=float(os.environ.get("SHORT_DRAMA_PROVIDER_TIMEOUT", "30"))) as response:
+            # Real image/video providers can spend well over a minute rendering.
+            # Keep the timeout configurable, but make the safe default long enough
+            # for a real generation request instead of failing while it is working.
+            with urllib.request.urlopen(request, timeout=float(os.environ.get("SHORT_DRAMA_PROVIDER_TIMEOUT", "120"))) as response:
                 raw = response.read().decode("utf-8")
                 return json.loads(raw)
         except HTTPError as error:

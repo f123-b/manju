@@ -57,7 +57,7 @@ def _request_json(url: str, api_key: str | None) -> dict[str, Any] | list[Any]:
     if api_key and api_key != "••••••••":
         headers["Authorization"] = f"Bearer {api_key}"
     request = Request(url, headers=headers, method="GET")
-    with urlopen(request, timeout=float(os.environ.get("SHORT_DRAMA_MODEL_DISCOVERY_TIMEOUT", "8"))) as response:
+    with urlopen(request, timeout=float(os.environ.get("SHORT_DRAMA_MODEL_DISCOVERY_TIMEOUT", "20"))) as response:
         return json.loads(response.read().decode("utf-8"))
 
 

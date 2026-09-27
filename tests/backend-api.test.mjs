@@ -14,7 +14,7 @@ test("FastAPI boots a relational demo and completes a durable generation task", 
   const port = 8123;
   const server = spawn("python", ["-m", "uvicorn", "backend.app:app", "--host", "127.0.0.1", "--port", String(port)], {
     cwd: root,
-    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "test.sqlite3"), SHORT_DRAMA_SEED_DEMO: "1", SHORT_DRAMA_DEMO_DELAY: "0.05", SHORT_DRAMA_POLL_INTERVAL: "0.05" },
+    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "test.sqlite3"), SHORT_DRAMA_SEED_DEMO: "1", SHORT_DRAMA_ALLOW_MOCK_GENERATION: "1", SHORT_DRAMA_DEMO_DELAY: "0.05", SHORT_DRAMA_POLL_INTERVAL: "0.05" },
     stdio: "ignore",
   });
   t.after(async () => {
@@ -49,7 +49,7 @@ test("FastAPI boots a relational demo and completes a durable generation task", 
   const characterAsset = await characterAssetResponse.json();
   assert.equal(characterAssetResponse.ok, true);
   assert.equal(characterAsset.asset.id, "C003");
-  assert.equal(characterAsset.asset.image, "/assets/shot-hero.png");
+  assert.equal(characterAsset.asset.image, null);
 
   const charactersResponse = await fetch(`http://127.0.0.1:${port}/api/projects/P001/characters`);
   const characters = await charactersResponse.json();
@@ -123,7 +123,7 @@ test("FastAPI boots a relational demo and completes a durable generation task", 
   const locationAsset = await locationAssetResponse.json();
   assert.equal(locationAssetResponse.ok, true);
   assert.equal(locationAsset.asset.id, "L002");
-  assert.equal(locationAsset.asset.image, "/assets/shot-wide.png");
+  assert.equal(locationAsset.asset.image, null);
 
   const createResponse = await fetch(`http://127.0.0.1:${port}/api/shots/SH046/generate`, {
     method: "POST",

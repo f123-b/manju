@@ -23,7 +23,7 @@ test("audio engine extracts lines, persists takes, runs QC and mixdown", async (
   const port = 8124;
   const server = spawn("python", ["-m", "uvicorn", "backend.app:app", "--host", "127.0.0.1", "--port", String(port)], {
     cwd: root,
-    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "audio.sqlite3"), SHORT_DRAMA_SEED_DEMO: "1", SHORT_DRAMA_DEMO_DELAY: "0.03", SHORT_DRAMA_POLL_INTERVAL: "0.03" },
+    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "audio.sqlite3"), SHORT_DRAMA_SEED_DEMO: "1", SHORT_DRAMA_ALLOW_MOCK_GENERATION: "1", SHORT_DRAMA_DEMO_DELAY: "0.03", SHORT_DRAMA_POLL_INTERVAL: "0.03" },
     stdio: "ignore",
   });
   t.after(async () => {

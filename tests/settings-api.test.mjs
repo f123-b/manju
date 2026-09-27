@@ -27,7 +27,7 @@ test("provider settings persist safely and test a configured endpoint", async (t
   const port = 8125;
   const server = spawn("python", ["-m", "uvicorn", "backend.app:app", "--host", "127.0.0.1", "--port", String(port)], {
     cwd: root,
-    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "settings.sqlite3"), SHORT_DRAMA_SEED_DEMO: "1", SHORT_DRAMA_DEMO_DELAY: "0.03", SHORT_DRAMA_POLL_INTERVAL: "0.03" },
+    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "settings.sqlite3"), SHORT_DRAMA_SEED_DEMO: "1", SHORT_DRAMA_ALLOW_MOCK_GENERATION: "1", SHORT_DRAMA_DEMO_DELAY: "0.03", SHORT_DRAMA_POLL_INTERVAL: "0.03" },
     stdio: "ignore",
   });
   t.after(async () => {
@@ -68,9 +68,9 @@ test("provider settings persist safely and test a configured endpoint", async (t
   const placeholderResponse = await fetch(`${base}/api/settings/providers`, {
     method: "PATCH",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ providerUrl: "https://blankapi.com/v1", providerName: "Example Provider", providerModel: "gpt-image-2", providerImageModel: "gpt-image-2", providerVideoModel: "video-model" }),
+    body: JSON.stringify({ providerUrl: "https://api.example.com/v1", providerName: "Example Provider", providerModel: "gpt-image-2", providerImageModel: "gpt-image-2", providerVideoModel: "video-model" }),
   });
-  assert.equal(placeholderResponse.ok, true);
+  assert.equal(placeholderResponse.ok, false);
   const placeholderHealth = await (await fetch(`${base}/api/health`)).json();
   assert.equal(placeholderHealth.mode, "demo");
   assert.equal(placeholderHealth.providers.image.configured, false);

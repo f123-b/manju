@@ -855,7 +855,7 @@ def fail_generation_task(task_id: str, error_message: str) -> str:
         if task["target_type"] == "asset":
             asset_type = loads(task["parameters_json"], {}).get("assetType")
             table = asset_type if asset_type in {"characters", "locations", "props"} else "locations"
-            connection.execute(f"UPDATE {table} SET status = '生成失败', updated_at = ? WHERE id = ?", (now_text(), task["target_id"]))
+            connection.execute(f"UPDATE {table} SET image = NULL, status = '生成失败', updated_at = ? WHERE id = ?", (now_text(), task["target_id"]))
         category = "video" if task["target_type"] == "shot" else "image" if task["target_type"] == "asset" else "workflow" if task["target_type"] == "runninghub_workflow" else "character_reference"
         connection.execute("INSERT INTO cost_records(id, project_id, shot_id, task_id, provider, model, category, estimated_cost, actual_cost, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'failed')", (new_id("COST-"), task["project_id"], task["shot_id"], task_id, task["provider"], task["model"], category, task["estimated_cost"]))
         return task["project_id"]

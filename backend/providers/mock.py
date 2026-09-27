@@ -22,10 +22,16 @@ class MockProvider(BaseProvider):
     async def submit(self, payload: dict[str, Any]) -> dict[str, Any]:
         await asyncio.sleep(float(os.environ.get("SHORT_DRAMA_DEMO_DELAY", "2.2")))
         if self.kind == "image":
+            allow_mock_media = os.environ.get("SHORT_DRAMA_ALLOW_MOCK_GENERATION", "").strip().lower() in {"1", "true", "yes", "on"}
+            if not allow_mock_media:
+                raise RuntimeError("未配置真实的图片生成 API，任务未生成。请在设置中填写可访问的 POST 生成接口和 API Key。")
             parameters = payload.get("parameters") or {}
             is_character = payload.get("target_type") == "character_reference" or payload.get("asset_type") == "characters" or parameters.get("asset_type") in {"characters", "character_reference"}
             output = "/assets/shot-hero.png" if is_character else "/assets/shot-wide.png"
         elif self.kind == "video":
+            allow_mock_media = os.environ.get("SHORT_DRAMA_ALLOW_MOCK_GENERATION", "").strip().lower() in {"1", "true", "yes", "on"}
+            if not allow_mock_media:
+                raise RuntimeError("未配置真实的视频生成 API，任务未生成。请在设置中填写可访问的 POST 生成接口和 API Key。")
             output = "/assets/shot-wide.png"
         elif self.kind == "audio":
             output, duration_ms = self._write_wav(payload)

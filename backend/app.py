@@ -179,7 +179,10 @@ async def get_provider_settings() -> dict[str, Any]:
 
 @app.patch("/api/settings/providers")
 async def patch_provider_settings(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
-    settings = save_provider_settings(payload)
+    try:
+        settings = save_provider_settings(payload)
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
     registry.reload()
     changed_keys = [key for key, value in payload.items() if key not in {"providerApiKey", "llmApiKey"} or value not in (None, "", "••••••••")]
     record_audit("settings.updated", "runtime_settings", metadata={"keys": sorted(changed_keys)})
@@ -1169,6 +1172,8 @@ async def generate_shot(shot_id: str, payload: Optional[dict[str, Any]] = Body(d
     summary = registry.summary()
     provider = payload.get("provider") or summary["provider"]
     model = payload.get("model") or (registry.video_model if summary["mode"] == "remote" else "mock-video")
+    if summary["mode"] == "remote" and not model:
+        raise HTTPException(status_code=422, detail="图片 API 已连接，但尚未配置视频模型。请在设置中填写视频模型，或配置支持视频的 Provider。")
     estimated_cost = float(payload.get("estimatedCost") or (0.73 if summary["mode"] == "demo" else os.environ.get("SHORT_DRAMA_ESTIMATED_COST", "0.73")))
     reference_context = shot_generation_context(shot_id)
     try:

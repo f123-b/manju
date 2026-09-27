@@ -13,7 +13,7 @@ from .voice import VoiceHttpProvider
 
 def _is_placeholder_url(value: str | None) -> bool:
     hostname = (urlparse(str(value or "")).hostname or "").lower().rstrip(".")
-    return hostname in {"blankapi.com", "example.com", "api.example.com"} or hostname.endswith(".example.com")
+    return hostname in {"example.com", "api.example.com"} or hostname.endswith(".example.com")
 
 
 class ProviderRegistry:
@@ -43,7 +43,10 @@ class ProviderRegistry:
         self.external_name = settings.get("providerName") or "External Video API"
         self.external_model = settings.get("providerModel") or "video-default"
         self.image_model = settings.get("providerImageModel") or self.external_model
-        self.video_model = settings.get("providerVideoModel") or self.external_model
+        # Image and video models are intentionally independent. If a relay only
+        # exposes image models, never silently send an image model to its video
+        # endpoint.
+        self.video_model = settings.get("providerVideoModel") or ""
         self.external_status_url = settings.get("providerStatusUrl") or None
         self.api_key = settings.get("providerApiKey") or None
         self.voice_provider = (settings.get("voiceProvider") or "mock").lower()
@@ -89,7 +92,7 @@ class ProviderRegistry:
             "voiceProviders": {key: bool(value) for key, value in self.voice_endpoints.items()},
             "providers": {
                 "image": {"provider": image_video_provider, "model": image_video_model, "configured": bool(self.external_url)},
-                "video": {"provider": image_video_provider, "model": self.video_model if self.external_url else "mock-video", "configured": bool(self.external_url)},
+                "video": {"provider": image_video_provider if self.video_model else "未配置", "model": self.video_model if self.external_url else "mock-video", "configured": bool(self.external_url and self.video_model)},
                 "audio": {"provider": audio_provider, "model": self.voice_model, "configured": bool(any(self.voice_endpoints.values()))},
                 "llm": {"provider": self.llm_name if self.llm_url else "Local Agent", "model": self.llm_model, "configured": bool(self.llm_url)},
                 "workflow": {"provider": "RunningHub", "model": "workflow", "configured": bool(self.runninghub_api_key)},
