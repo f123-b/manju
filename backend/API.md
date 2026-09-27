@@ -53,6 +53,12 @@ POST        /api/agent/runs/{run_id}/resume
 POST        /api/agent/runs/{run_id}/cancel
 POST/GET    /api/episodes/{episode_id}/render(s)
 
+# RunningHub 工作流
+GET/POST    /api/projects/{project_id}/runninghub/workflows
+PATCH/DELETE /api/runninghub/workflows/{workflow_record_id}
+POST        /api/runninghub/workflows/{workflow_record_id}/run
+POST        /api/runninghub/upload
+
 # Production Canvas
 GET         /api/projects/{project_id}/canvas
 POST        /api/projects/{project_id}/canvas/nodes
@@ -131,6 +137,22 @@ SHORT_DRAMA_LLM_API_KEY=
 Provider 和 LLM API Key 不会通过 API 返回明文。Windows 桌面预览使用当前用户 DPAPI 加密；非 Windows 开发环境使用 `data/.secret-key` 的本地密钥文件回退，文件已加入忽略列表。`/api/session` 和 `audit_events` 为后续多用户身份、权限和审计接入预留边界，当前预览版仍是本机单用户模式。
 
 生产画布使用 `canvas_nodes` 和 `canvas_edges` 持久化节点工作流。画布首次打开时会为项目创建故事灵感、剧本 Agent、场景剧本、角色/场景参考、镜头画面、视频生成和时间线/音频七个起始节点。节点可保存标题、内容、提示词、资产或镜头绑定、位置和执行状态；Agent、图片和视频节点可从画布直接进入现有 Agent 或统一生成任务队列，文本和音频节点先作为可连接的工作流输入。
+
+RunningHub 工作流页用于导入和运行 ComfyUI/RunningHub API JSON：
+
+- `POST /api/projects/{project_id}/runninghub/workflows` 保存 `name`、`workflowId`、`description` 和 `apiJson`；编辑器从 API JSON 的 `inputs` 中提取可编辑字段，并在提交前转换为 RunningHub 的 `nodeInfoList`。
+- `POST /api/runninghub/upload` 使用当前配置的 API Key 将图片或其他输入文件上传到 RunningHub，返回 provider 的 `fileName`，不把文件内容或密钥写入日志。
+- `POST /api/runninghub/workflows/{workflow_record_id}/run` 创建统一生成任务；worker 调用 RunningHub 创建任务接口，再轮询任务状态，成功后把输出 URL 保存到任务结果和 `media_assets`。
+- `GET /api/projects/{project_id}/tasks` 与“任务与结果”页继续统一展示 RunningHub、图片、视频、音频和渲染任务；没有 API Key 时运行请求会明确返回 422，而不会创建幽灵任务。
+
+设置页字段：
+
+```env
+SHORT_DRAMA_RUNNINGHUB_BASE_URL=https://www.runninghub.cn
+SHORT_DRAMA_RUNNINGHUB_API_KEY=
+```
+
+RunningHub 的公开 API 采用“提交任务返回 `taskId`、再查询状态和结果”的异步模式；完整工作流通常还需要把节点输入整理成 `nodeInfoList`，文件输入先通过上传接口转成 provider 文件名。实现依据官方公开文档：[API 概览](https://www.runninghub.cn/runninghub-api-doc-cn/)、[工作流完整接入示例](https://www.runninghub.cn/runninghub-api-doc-cn/doc-8287342)、[文件上传接口](https://rhtv.runninghub.cn/runninghub-api-doc-cn/api-425749007)、[V2 任务查询](https://www.runninghub.cn/runninghub-api-doc-cn/api-425767306)。
 
 环境变量：
 

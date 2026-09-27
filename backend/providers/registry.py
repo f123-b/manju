@@ -6,6 +6,7 @@ from typing import Any
 from .base import BaseProvider
 from .http import HttpProvider
 from .mock import MockProvider
+from .runninghub import RunningHubProvider
 from .voice import VoiceHttpProvider
 
 
@@ -24,6 +25,8 @@ class ProviderRegistry:
             "llmProviderUrl": os.environ.get("SHORT_DRAMA_LLM_PROVIDER_URL", ""),
             "llmProviderName": os.environ.get("SHORT_DRAMA_LLM_PROVIDER_NAME", "OpenAI Compatible"),
             "llmModel": os.environ.get("SHORT_DRAMA_LLM_MODEL", "gpt-4o-mini"),
+            "runninghubBaseUrl": os.environ.get("SHORT_DRAMA_RUNNINGHUB_BASE_URL", "https://www.runninghub.cn"),
+            "runninghubApiKey": os.environ.get("SHORT_DRAMA_RUNNINGHUB_API_KEY", ""),
         })
 
     def apply_settings(self, settings: dict[str, Any]) -> None:
@@ -41,6 +44,8 @@ class ProviderRegistry:
         self.llm_url = settings.get("llmProviderUrl") or None
         self.llm_name = settings.get("llmProviderName") or "OpenAI Compatible"
         self.llm_model = settings.get("llmModel") or "gpt-4o-mini"
+        self.runninghub_url = settings.get("runninghubBaseUrl") or "https://www.runninghub.cn"
+        self.runninghub_api_key = settings.get("runninghubApiKey") or None
 
     def reload(self) -> None:
         from ..services.runtime_settings import _raw_settings
@@ -48,6 +53,8 @@ class ProviderRegistry:
         self.apply_settings(_raw_settings())
 
     def resolve(self, kind: str, provider: str | None = None, model: str | None = None) -> BaseProvider:
+        if kind == "workflow" and (not provider or provider == "RunningHub"):
+            return RunningHubProvider(self.runninghub_url, self.runninghub_api_key, model or "workflow")
         if kind in {"image", "video"} and self.external_url and (not provider or provider == self.external_name):
             return HttpProvider(kind, self.external_url, self.external_name, model or self.external_model, self.api_key)
         if kind == "audio":
@@ -72,5 +79,6 @@ class ProviderRegistry:
                 "video": {"provider": image_video_provider, "model": self.external_model if self.external_url else "mock-video", "configured": bool(self.external_url)},
                 "audio": {"provider": audio_provider, "model": self.voice_model, "configured": bool(any(self.voice_endpoints.values()))},
                 "llm": {"provider": self.llm_name if self.llm_url else "Local Agent", "model": self.llm_model, "configured": bool(self.llm_url)},
+                "workflow": {"provider": "RunningHub", "model": "workflow", "configured": bool(self.runninghub_api_key)},
             },
         }

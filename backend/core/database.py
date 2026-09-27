@@ -95,6 +95,8 @@ def init_database() -> None:
         connection.executescript(workspace_migration.read_text(encoding="utf-8"))
         canvas_migration = ROOT / "backend" / "migrations" / "009_canvas.sql"
         connection.executescript(canvas_migration.read_text(encoding="utf-8"))
+        runninghub_migration = ROOT / "backend" / "migrations" / "010_runninghub.sql"
+        connection.executescript(runninghub_migration.read_text(encoding="utf-8"))
         connection.execute("UPDATE shot_characters SET id = 'SCB-' || lower(hex(randomblob(6))) WHERE id IS NULL")
         connection.execute("UPDATE shot_characters SET position = (SELECT COUNT(*) FROM shot_characters earlier WHERE earlier.shot_id = shot_characters.shot_id AND earlier.rowid <= shot_characters.rowid) - 1 WHERE position = 0")
         has_projects = connection.execute("SELECT 1 FROM projects LIMIT 1").fetchone()

@@ -1,8 +1,10 @@
 const API_BASE = import.meta.env.VITE_API_BASE_URL || "/api";
 
 async function request(path, options = {}) {
+  const headers = { "Content-Type": "application/json", ...(options.headers || {}) };
+  if (typeof FormData !== "undefined" && options.body instanceof FormData) delete headers["Content-Type"];
   const response = await fetch(`${API_BASE}${path}`, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
+    headers,
     ...options,
   });
 
@@ -54,6 +56,32 @@ export function deleteRemoteCanvasEdge(edgeId) {
 
 export function runRemoteCanvasNode(nodeId, payload = {}) {
   return request(`/canvas-nodes/${nodeId}/run`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function listRemoteRunningHubWorkflows() {
+  return request("/projects/P001/runninghub/workflows").then((response) => response.items || []);
+}
+
+export function createRemoteRunningHubWorkflow(payload) {
+  return request("/projects/P001/runninghub/workflows", { method: "POST", body: JSON.stringify(payload) }).then((response) => response.workflow);
+}
+
+export function patchRemoteRunningHubWorkflow(workflowId, payload) {
+  return request(`/runninghub/workflows/${workflowId}`, { method: "PATCH", body: JSON.stringify(payload) }).then((response) => response.workflow);
+}
+
+export function deleteRemoteRunningHubWorkflow(workflowId) {
+  return request(`/runninghub/workflows/${workflowId}`, { method: "DELETE" });
+}
+
+export function runRemoteRunningHubWorkflow(workflowId, payload = {}) {
+  return request(`/runninghub/workflows/${workflowId}/run`, { method: "POST", body: JSON.stringify(payload) });
+}
+
+export function uploadRemoteRunningHubFile(file) {
+  const body = new FormData();
+  body.append("file", file);
+  return request("/runninghub/upload", { method: "POST", body });
 }
 
 export function saveRemoteProject(project) {

@@ -18,7 +18,7 @@ from ..domain.repository import (
 from ..providers.registry import ProviderRegistry
 
 
-KIND_BY_TASK_TYPE = {"视频": "video", "图片": "image", "文本": "text", "语音": "audio", "音频": "audio"}
+KIND_BY_TASK_TYPE = {"视频": "video", "图片": "image", "文本": "text", "语音": "audio", "音频": "audio", "工作流": "workflow"}
 PENDING_STATUSES = {"Queued", "Retrying", "Running", "Processing", "Pending"}
 
 
@@ -86,6 +86,48 @@ class TaskEngine:
             from .asset_generation_service import run_asset_task
 
             await run_asset_task(task, self.registry)
+            return
+        if task.get("target_type") == "runninghub_workflow":
+            parameters = loads(task.get("parameters_json"), {})
+            provider = self.registry.resolve("workflow", task.get("provider"), task.get("model"))
+            payload = {
+                "task_id": task["id"],
+                "project_id": task["project_id"],
+                "workflow_id": parameters.get("workflowId") or parameters.get("workflow_id"),
+                "nodeInfoList": parameters.get("nodeInfoList") or [],
+                "accessPassword": parameters.get("accessPassword"),
+                "retainSeconds": parameters.get("retainSeconds"),
+                "webhookUrl": parameters.get("webhookUrl"),
+                "estimatedCost": task.get("estimated_cost"),
+            }
+            update_task_runtime(task_id, {"status": "Running", "progress": 10})
+            response = await provider.submit(payload)
+            response = response or {}
+            provider_task_id = response.get("provider_task_id") or response.get("task_id") or response.get("id")
+            update_task_runtime(task_id, {"provider_task_id": provider_task_id, "progress": 25})
+            status = str(response.get("status") or "Queued")
+            deadline = time.monotonic() + float(os.environ.get("SHORT_DRAMA_TASK_TIMEOUT", "900"))
+            result = response
+            while status.lower() in {item.lower() for item in PENDING_STATUSES}:
+                if time.monotonic() > deadline:
+                    raise TimeoutError("RunningHub 任务等待平台结果超时")
+                await asyncio.sleep(float(os.environ.get("SHORT_DRAMA_POLL_INTERVAL", "2")))
+                current = task_row(task_id)
+                if current and current["status"] == "Cancelled":
+                    if provider_task_id:
+                        await provider.cancel(provider_task_id)
+                    return
+                result = await provider.status(provider_task_id or "")
+                status = str(result.get("status") or "Running")
+                update_task_runtime(task_id, {"progress": 90 if status.lower() == "success" else 45})
+            if status.lower() in {"failed", "error"}:
+                raise RuntimeError(result.get("error") or "RunningHub 返回失败")
+            if status.lower() in {"cancelled", "canceled"}:
+                from ..domain.repository import cancel_generation_task
+
+                cancel_generation_task(task_id)
+                return
+            complete_generation_task(task_id, result)
             return
         kind = KIND_BY_TASK_TYPE.get(task.get("type", "视频"), "video")
         provider = self.registry.resolve(kind, task.get("provider"), task.get("model"))

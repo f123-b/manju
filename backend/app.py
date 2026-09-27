@@ -6,7 +6,7 @@ import os
 from urllib.parse import quote
 from typing import Any, Optional
 
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.responses import Response
 from fastapi.staticfiles import StaticFiles
 
@@ -32,6 +32,7 @@ from .domain.repository import (
     generation_task,
     list_costs,
     list_canvas,
+    list_runninghub_workflows,
     list_models,
     list_projects,
     list_qc,
@@ -42,10 +43,13 @@ from .domain.repository import (
     patch_canvas_node,
     patch_episode,
     patch_project,
+    patch_runninghub_workflow,
     patch_scene,
     patch_shot,
     patch_story_bible,
     project_to_dict,
+    create_runninghub_workflow,
+    delete_runninghub_workflow,
     retry_generation_task,
 )
 from .domain.character_assets import (
@@ -368,6 +372,106 @@ async def run_canvas_node(node_id: str, payload: dict[str, Any] = Body(default={
         raise not_found(str(error)) from error
     except ValueError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.get("/api/projects/{project_id}/runninghub/workflows")
+async def get_runninghub_workflows(project_id: str) -> dict[str, Any]:
+    try:
+        return {"items": list_runninghub_workflows(project_id)}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/projects/{project_id}/runninghub/workflows")
+async def post_runninghub_workflow(project_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        workflow = create_runninghub_workflow(project_id, payload)
+        record_audit("runninghub.workflow.created", "runninghub_workflow", workflow["id"], {"workflowId": workflow["workflowId"]})
+        return {"workflow": workflow}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.patch("/api/runninghub/workflows/{workflow_record_id}")
+async def patch_runninghub_workflow_resource(workflow_record_id: str, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+    try:
+        project_id, workflow = patch_runninghub_workflow(workflow_record_id, payload)
+        record_audit("runninghub.workflow.updated", "runninghub_workflow", workflow_record_id, {"keys": sorted(payload)})
+        return {"projectId": project_id, "workflow": workflow}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+    except ValueError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+
+@app.delete("/api/runninghub/workflows/{workflow_record_id}")
+async def delete_runninghub_workflow_resource(workflow_record_id: str) -> dict[str, Any]:
+    try:
+        project_id = delete_runninghub_workflow(workflow_record_id)
+        record_audit("runninghub.workflow.deleted", "runninghub_workflow", workflow_record_id)
+        return {"ok": True, "projectId": project_id}
+    except KeyError as error:
+        raise not_found(str(error)) from error
+
+
+@app.post("/api/runninghub/workflows/{workflow_record_id}/run")
+async def run_runninghub_workflow(workflow_record_id: str, payload: dict[str, Any] = Body(default={})) -> dict[str, Any]:
+    with session() as connection:
+        row = connection.execute("SELECT * FROM runninghub_workflows WHERE id = ?", (workflow_record_id,)).fetchone()
+    if not row:
+        raise not_found(f"runninghub workflow {workflow_record_id} not found")
+    if not registry.summary()["providers"]["workflow"]["configured"]:
+        raise HTTPException(status_code=422, detail="请先在设置中配置 RunningHub API Key")
+    api_json = json.loads(row["api_json"] or "{}")
+    node_info_list = payload.get("nodeInfoList") or []
+    task_id = create_target_generation_task(
+        row["project_id"],
+        "runninghub_workflow",
+        workflow_record_id,
+        str(payload.get("prompt") or row["name"]),
+        "RunningHub",
+        "workflow",
+        float(payload.get("estimatedCost") or 0.73),
+        {"workflowId": row["workflow_id"], "nodeInfoList": node_info_list, "apiJson": api_json, "retainSeconds": payload.get("retainSeconds")},
+        "工作流",
+    )
+    record_audit("runninghub.workflow.run", "runninghub_workflow", workflow_record_id, {"taskId": task_id})
+    task_engine.wake()
+    return {"queued": True, "task": task_response(task_id)}
+
+
+@app.post("/api/runninghub/upload")
+async def upload_runninghub_file(request: Request) -> dict[str, Any]:
+    if not registry.summary()["providers"]["workflow"]["configured"]:
+        raise HTTPException(status_code=422, detail="请先在设置中配置 RunningHub API Key")
+    raw_content_type = request.headers.get("content-type", "")
+    boundary_marker = "boundary="
+    if boundary_marker not in raw_content_type:
+        raise HTTPException(status_code=400, detail="上传请求缺少 multipart boundary")
+    boundary = raw_content_type.split(boundary_marker, 1)[1].strip().strip('"')
+    body = await request.body()
+    chunks = body.split(f"--{boundary}".encode("utf-8"))
+    file_name = "upload.bin"
+    file_content = b""
+    for chunk in chunks:
+        if b"filename=" not in chunk or b"\r\n\r\n" not in chunk:
+            continue
+        headers, file_content = chunk.split(b"\r\n\r\n", 1)
+        disposition = headers.decode("utf-8", errors="ignore")
+        marker = "filename=\""
+        if marker in disposition:
+            file_name = disposition.split(marker, 1)[1].split("\"", 1)[0]
+        file_content = file_content.rstrip(b"\r\n-")
+        break
+    if not file_content:
+        raise HTTPException(status_code=400, detail="未收到上传文件")
+    provider = registry.resolve("workflow", "RunningHub", "workflow")
+    try:
+        return await provider.upload(file_name, file_content, None)
+    except Exception as error:  # noqa: BLE001 - surface provider failure as API error
+        raise HTTPException(status_code=502, detail=f"RunningHub 文件上传失败：{error}") from error
 
 
 @app.patch("/api/projects/{project_id}")

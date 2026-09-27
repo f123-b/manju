@@ -25,6 +25,8 @@ SETTING_ENV = {
     "llmProviderName": "SHORT_DRAMA_LLM_PROVIDER_NAME",
     "llmModel": "SHORT_DRAMA_LLM_MODEL",
     "llmApiKey": "SHORT_DRAMA_LLM_API_KEY",
+    "runninghubBaseUrl": "SHORT_DRAMA_RUNNINGHUB_BASE_URL",
+    "runninghubApiKey": "SHORT_DRAMA_RUNNINGHUB_API_KEY",
 }
 
 DEFAULTS = {
@@ -41,9 +43,11 @@ DEFAULTS = {
     "llmProviderName": "OpenAI Compatible",
     "llmModel": "gpt-4o-mini",
     "llmApiKey": "",
+    "runninghubBaseUrl": "https://www.runninghub.cn",
+    "runninghubApiKey": "",
 }
 
-SECRET_KEYS = {"providerApiKey", "llmApiKey"}
+SECRET_KEYS = {"providerApiKey", "llmApiKey", "runninghubApiKey"}
 
 
 def _llm_models_endpoint(endpoint: str) -> str:
@@ -82,14 +86,18 @@ def public_provider_settings() -> dict[str, Any]:
     values = _raw_settings()
     has_key = bool(values.get("providerApiKey"))
     has_llm_key = bool(values.get("llmApiKey"))
+    has_runninghub_key = bool(values.get("runninghubApiKey"))
     return {
-        **{key: value for key, value in values.items() if key not in {"providerApiKey", "llmApiKey"}},
+        **{key: value for key, value in values.items() if key not in SECRET_KEYS},
         "providerApiKey": "",
         "providerApiKeyMasked": "••••••••" if has_key else "",
         "apiKeySet": has_key,
         "llmApiKey": "",
         "llmApiKeyMasked": "••••••••" if has_llm_key else "",
         "llmApiKeySet": has_llm_key,
+        "runninghubApiKey": "",
+        "runninghubApiKeyMasked": "••••••••" if has_runninghub_key else "",
+        "runninghubApiKeySet": has_runninghub_key,
         "secretStorage": storage_status(),
     }
 
@@ -109,13 +117,34 @@ def save_provider_settings(payload: dict[str, Any]) -> dict[str, Any]:
                 value = protect_secret(str(value))
             connection.execute(
                 "INSERT INTO runtime_settings(key, value, is_secret, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value, is_secret = excluded.is_secret, updated_at = excluded.updated_at",
-                (key, str(value or ""), int(key in {"providerApiKey", "llmApiKey"}), now_text()),
+                (key, str(value or ""), int(key in SECRET_KEYS), now_text()),
             )
     return public_provider_settings()
 
 
 def test_provider_connection(payload: dict[str, Any]) -> dict[str, Any]:
     provider_kind = payload.get("kind", "video")
+    if provider_kind == "runninghub":
+        endpoint = payload.get("runninghubBaseUrl") or DEFAULTS["runninghubBaseUrl"]
+        label = "RunningHub"
+        api_key = payload.get("runninghubApiKey")
+        if not endpoint:
+            return {"ok": False, "status": "not_configured", "message": "请先填写 RunningHub 地址"}
+        if not str(endpoint).startswith(("http://", "https://")):
+            return {"ok": False, "status": "invalid", "message": "RunningHub 地址必须以 http:// 或 https:// 开头"}
+        headers = {"Accept": "application/json"}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        try:
+            request = Request(str(endpoint).rstrip("/") + "/", headers=headers, method="GET")
+            with urlopen(request, timeout=5) as response:
+                return {"ok": True, "status": "reachable", "message": f"{label} 已连接（HTTP {response.status}）", "endpoint": str(endpoint)}
+        except HTTPError as error:
+            if error.code in {401, 403, 404, 405}:
+                return {"ok": True, "status": "reachable", "message": f"{label} 可访问（HTTP {error.code}）", "endpoint": str(endpoint)}
+            return {"ok": False, "status": "http_error", "message": f"RunningHub 返回 HTTP {error.code}", "endpoint": str(endpoint)}
+        except (URLError, TimeoutError, OSError) as error:
+            return {"ok": False, "status": "unreachable", "message": f"连接失败：{error}", "endpoint": str(endpoint)}
     if provider_kind == "audio":
         provider = str(payload.get("voiceProvider") or "mock").lower()
         endpoint = {"cosyvoice": payload.get("cosyvoiceUrl"), "chatterbox": payload.get("chatterboxUrl"), "gpt-sovits": payload.get("gptSovitsUrl")}.get(provider)

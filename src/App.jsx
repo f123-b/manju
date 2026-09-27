@@ -3,6 +3,7 @@ import { CheckCircle, Sparkle } from "@phosphor-icons/react";
 import { Sidebar, Topbar } from "./components/Chrome.jsx";
 import { StoryboardWorkspace } from "./components/StoryboardWorkspace.jsx";
 import { CanvasPage } from "./components/CanvasPage.jsx";
+import { RunningHubPage } from "./components/RunningHubPage.jsx";
 import { ModulePage, SearchDialog } from "./components/ModulePages.jsx";
 import {
   cancelRemoteTask,
@@ -74,6 +75,12 @@ import {
   saveRemoteProviderSettings,
   testRemoteProviderSettings,
   runRemoteCanvasNode,
+  listRemoteRunningHubWorkflows,
+  createRemoteRunningHubWorkflow,
+  patchRemoteRunningHubWorkflow,
+  deleteRemoteRunningHubWorkflow,
+  runRemoteRunningHubWorkflow,
+  uploadRemoteRunningHubFile,
 } from "./apiClient.js";
 import {
   addShot,
@@ -533,6 +540,33 @@ export function App() {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return runRemoteCanvasNode(nodeId, payload);
     },
+    getRunningHubWorkflows: () => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return listRemoteRunningHubWorkflows();
+    },
+    createRunningHubWorkflow: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteRunningHubWorkflow(payload);
+    },
+    patchRunningHubWorkflow: (workflowId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteRunningHubWorkflow(workflowId, payload);
+    },
+    deleteRunningHubWorkflow: (workflowId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return deleteRemoteRunningHubWorkflow(workflowId);
+    },
+    runRunningHubWorkflow: (workflowId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return runRemoteRunningHubWorkflow(workflowId, payload).then(async (response) => {
+        setProject(await getRemoteProject());
+        return response;
+      });
+    },
+    uploadRunningHubFile: (file) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return uploadRemoteRunningHubFile(file);
+    },
     startAgentRun: (payload) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return startRemoteAgentRun(payload);
@@ -750,7 +784,7 @@ export function App() {
               onGenerate={generateShot}
               onEpisodeChange={changeEpisode}
             />
-          ) : activeNav === "画布" ? <CanvasPage project={project} actions={actions} /> : <ModulePage activeNav={activeNav} project={project} stats={stats} actions={actions} />}
+          ) : activeNav === "画布" ? <CanvasPage project={project} actions={actions} /> : activeNav === "工作流" ? <RunningHubPage project={project} actions={actions} /> : <ModulePage activeNav={activeNav} project={project} stats={stats} actions={actions} />}
         </main>
       </div>
       <SearchDialog open={searchOpen} project={project} onClose={() => setSearchOpen(false)} onOpenResult={openSearchResult} />

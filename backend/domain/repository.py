@@ -168,6 +168,74 @@ def delete_canvas_edge(edge_id: str) -> str:
         return row["project_id"]
 
 
+def _runninghub_workflow_dict(row: sqlite3.Row) -> dict[str, Any]:
+    return {
+        "id": row["id"],
+        "projectId": row["project_id"],
+        "workflowId": row["workflow_id"],
+        "name": row["name"],
+        "description": row["description"],
+        "apiJson": loads(row["api_json"], {}),
+        "status": row["status"],
+        "createdAt": row["created_at"],
+        "updatedAt": row["updated_at"],
+    }
+
+
+def list_runninghub_workflows(project_id: str) -> list[dict[str, Any]]:
+    with session() as connection:
+        _project_row(connection, project_id)
+        rows = connection.execute("SELECT * FROM runninghub_workflows WHERE project_id = ? ORDER BY updated_at DESC, created_at DESC", (project_id,)).fetchall()
+        return [_runninghub_workflow_dict(row) for row in rows]
+
+
+def create_runninghub_workflow(project_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    api_json = payload.get("apiJson") or payload.get("api_json") or {}
+    if not isinstance(api_json, dict):
+        raise ValueError("工作流 JSON 必须是对象")
+    name = str(payload.get("name") or "未命名工作流").strip() or "未命名工作流"
+    with session() as connection:
+        _project_row(connection, project_id)
+        workflow_id = new_id("RHW-")
+        connection.execute(
+            "INSERT INTO runninghub_workflows(id, project_id, workflow_id, name, description, api_json, status) VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (workflow_id, project_id, str(payload.get("workflowId") or ""), name, str(payload.get("description") or ""), dumps(api_json), str(payload.get("status") or "draft")),
+        )
+        return _runninghub_workflow_dict(connection.execute("SELECT * FROM runninghub_workflows WHERE id = ?", (workflow_id,)).fetchone())
+
+
+def patch_runninghub_workflow(workflow_record_id: str, payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
+    allowed = {"workflow_id", "name", "description", "api_json", "status"}
+    values: list[tuple[str, Any]] = []
+    for key, value in payload.items():
+        database_key = {"workflowId": "workflow_id", "apiJson": "api_json"}.get(key, key)
+        if database_key not in allowed:
+            continue
+        if database_key == "api_json":
+            if not isinstance(value, dict):
+                raise ValueError("工作流 JSON 必须是对象")
+            value = dumps(value)
+        values.append((database_key, value))
+    if not values:
+        raise ValueError("没有可更新的工作流字段")
+    with session() as connection:
+        row = connection.execute("SELECT project_id FROM runninghub_workflows WHERE id = ?", (workflow_record_id,)).fetchone()
+        if not row:
+            raise KeyError(f"runninghub workflow {workflow_record_id} not found")
+        columns = ", ".join(f"{key} = ?" for key, _ in values)
+        connection.execute(f"UPDATE runninghub_workflows SET {columns}, updated_at = ? WHERE id = ?", [value for _, value in values] + [now_text(), workflow_record_id])
+        return row["project_id"], _runninghub_workflow_dict(connection.execute("SELECT * FROM runninghub_workflows WHERE id = ?", (workflow_record_id,)).fetchone())
+
+
+def delete_runninghub_workflow(workflow_record_id: str) -> str:
+    with session() as connection:
+        row = connection.execute("SELECT project_id FROM runninghub_workflows WHERE id = ?", (workflow_record_id,)).fetchone()
+        if not row:
+            raise KeyError(f"runninghub workflow {workflow_record_id} not found")
+        connection.execute("DELETE FROM runninghub_workflows WHERE id = ?", (workflow_record_id,))
+        return row["project_id"]
+
+
 def _project_row(connection: sqlite3.Connection, project_id: str):
     row = connection.execute("SELECT * FROM projects WHERE id = ? AND archived = 0", (project_id,)).fetchone()
     if not row:
@@ -717,6 +785,25 @@ def complete_generation_task(task_id: str, result: dict[str, Any]) -> str:
             connection.execute("UPDATE projects SET spent = spent + ?, updated_at = ? WHERE id = ?", (actual_cost, now_text(), task["project_id"]))
             connection.execute("INSERT INTO cost_records(id, project_id, task_id, provider, model, category, estimated_cost, actual_cost, status) VALUES (?, ?, ?, ?, ?, 'character_reference', ?, ?, 'actual')", (new_id("COST-"), task["project_id"], task_id, task["provider"], task["model"], task["estimated_cost"], actual_cost))
             return task["project_id"]
+        if task["target_type"] == "runninghub_workflow":
+            parameters = loads(task["parameters_json"], {})
+            results = result.get("results") if isinstance(result.get("results"), list) else []
+            output_url = result.get("output_url") or result.get("url") or (results[0].get("url") if results and isinstance(results[0], dict) else None)
+            media_asset_id = None
+            if output_url:
+                media_asset_id = new_id("MEDIA-")
+                connection.execute(
+                    "INSERT INTO media_assets(id, project_id, type, path_or_url, source, provider, model, prompt, metadata_json) VALUES (?, ?, 'runninghub_output', ?, 'provider', ?, ?, ?, ?)",
+                    (media_asset_id, task["project_id"], output_url, task["provider"], task["model"], task["prompt"], dumps({"taskId": task["provider_task_id"], "results": results})),
+                )
+            parameters["results"] = results
+            if media_asset_id:
+                parameters["mediaAssetId"] = media_asset_id
+            actual_cost = round(float(result.get("cost") or task["estimated_cost"] or 0), 2)
+            connection.execute("UPDATE generation_tasks SET status = 'Success', progress = 100, actual_cost = ?, parameters_json = ?, completed_at = ?, updated_at = ? WHERE id = ?", (actual_cost, dumps(parameters), now_text(), now_text(), task_id))
+            connection.execute("UPDATE projects SET spent = spent + ?, updated_at = ? WHERE id = ?", (actual_cost, now_text(), task["project_id"]))
+            connection.execute("INSERT INTO cost_records(id, project_id, task_id, provider, model, category, estimated_cost, actual_cost, status) VALUES (?, ?, ?, ?, ?, 'workflow', ?, ?, 'actual')", (new_id("COST-"), task["project_id"], task_id, task["provider"], task["model"], task["estimated_cost"], actual_cost))
+            return task["project_id"]
         shot = connection.execute("SELECT * FROM shots WHERE id = ?", (task["shot_id"],)).fetchone()
         if not shot:
             raise KeyError(f"shot {task['shot_id']} not found")
@@ -757,7 +844,7 @@ def fail_generation_task(task_id: str, error_message: str) -> str:
             asset_type = loads(task["parameters_json"], {}).get("assetType")
             table = asset_type if asset_type in {"characters", "locations", "props"} else "locations"
             connection.execute(f"UPDATE {table} SET status = '生成失败', updated_at = ? WHERE id = ?", (now_text(), task["target_id"]))
-        category = "video" if task["target_type"] == "shot" else "image" if task["target_type"] == "asset" else "character_reference"
+        category = "video" if task["target_type"] == "shot" else "image" if task["target_type"] == "asset" else "workflow" if task["target_type"] == "runninghub_workflow" else "character_reference"
         connection.execute("INSERT INTO cost_records(id, project_id, shot_id, task_id, provider, model, category, estimated_cost, actual_cost, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, 'failed')", (new_id("COST-"), task["project_id"], task["shot_id"], task_id, task["provider"], task["model"], category, task["estimated_cost"]))
         return task["project_id"]
 

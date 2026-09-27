@@ -16,11 +16,13 @@ import {
   Sparkle,
   SquaresFour,
   SpeakerHigh,
+  Stack,
 } from "@phosphor-icons/react";
 
 const navItems = [
   { label: "Agent", icon: Robot },
   { label: "画布", icon: Graph },
+  { label: "工作流", icon: Stack },
   { label: "概览", icon: House },
   { label: "故事", icon: Note },
   { label: "剧集", icon: FilmStrip },
