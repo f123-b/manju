@@ -16,3 +16,17 @@ implementation is an independent, Manju-native design that keeps the original
 projects' license obligations separate from Manju source. If a future change
 copies or adapts upstream code, retain the applicable full license and notice
 files in the copied module and update this document.
+
+
+## Story Engine inspirations
+
+The Manju-native Story Engine is independently implemented after studying these pinned open-source projects:
+
+| Project | Commit | License | Ideas studied |
+| --- | --- | --- | --- |
+| shuohao-skills | `ef4ac0c313c7eeb1f918db5f0f0eb319745900bc` | Apache-2.0 | Structured outline/script/storyboard schemas, timing rules, deterministic validation |
+| drama-skills | `0afa4ea253cf4d1aa2d134863b15a592547cfb54` | MIT | Short-drama development craft, continuity contracts, hook/payoff/reversal workflow |
+| script-doctor | `e4a7460a7fc4cd6e1d106fcbbb248273daec4c49` | MIT | Story Bible, beat planning, scene acceptance criteria |
+| CineCrew | `9a00efa7db65ba028c1523907f6cee844776123a` | Apache-2.0 | Crew separation, cinematography fields, narrative-to-production structured handoff |
+
+No upstream source file is copied verbatim. Manju uses its own relational schema, services and API contracts.

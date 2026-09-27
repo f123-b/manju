@@ -113,10 +113,12 @@ from .services.agent_service import cancel_agent_run, create_agent_run, get_agen
 from .services.qc_service import run_project_continuity_check, run_project_qc, run_shot_visual_qc
 from .services.render_service import list_render_jobs, render_episode_mp4
 from .services.workspace_service import list_audit_events, record_audit, session_descriptor
+from .story_api import router as story_engine_router
 
 
 app = FastAPI(title="Short Drama OS API", version="1.0.0")
 registry = ProviderRegistry()
+app.include_router(story_engine_router)
 
 
 def not_found(message: str) -> HTTPException:
