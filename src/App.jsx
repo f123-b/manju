@@ -1,29 +1,123 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+
+const REMOTE_POLL_MAX_ATTEMPTS = 180;
 import { CheckCircle, Sparkle } from "@phosphor-icons/react";
 import { Sidebar, Topbar } from "./components/Chrome.jsx";
 import { StoryboardWorkspace } from "./components/StoryboardWorkspace.jsx";
+import { CanvasPage } from "./components/CanvasPage.jsx";
+import { RunningHubPage } from "./components/RunningHubPage.jsx";
 import { ModulePage, SearchDialog } from "./components/ModulePages.jsx";
-import { generateRemoteShot, getRemoteHealth, getRemoteProject, saveRemoteProject } from "./apiClient.js";
+import {
+  cancelRemoteTask,
+  createRemoteProject,
+  createRemoteCanvasEdge,
+  createRemoteCanvasNode,
+  createRemoteAsset,
+  createRemoteScene,
+  createRemoteShot,
+  deleteRemoteShot,
+  deleteRemoteCanvasEdge,
+  deleteRemoteCanvasNode,
+  exportRemoteProject,
+  generateRemoteBreakdown,
+  generateRemoteMatrix,
+  generateRemoteAsset,
+  generateRemoteCandidates,
+  generateRemoteMasterSheet,
+  generateRemoteSceneScript,
+  generateRemoteShot,
+  getRemoteProviderSettings,
+  getRemoteCanvas,
+  getRemoteAgentRun,
+  listRemoteAgentRuns,
+  getRemoteHealth,
+  getRemoteProject,
+  getRemoteScenes,
+  approveRemoteReference,
+  rejectRemoteReference,
+  extractRemoteAnchors,
+  createRemoteCharacterLook,
+  activateRemoteTake,
+  createRemoteAudioClip,
+  patchRemoteAudioClip,
+  deleteRemoteAudioClip,
+  createRemoteVideoClip,
+  patchRemoteVideoClip,
+  deleteRemoteVideoClip,
+  createRemoteVoiceProfile,
+  directRemotePerformance,
+  extractRemoteDialogueLines,
+  generateRemoteDialogueLine,
+  generateRemoteEpisodeDialogue,
+  lockRemoteCharacter,
+  lockRemoteVoiceProfile,
+  mixdownRemoteEpisode,
+  renderRemoteEpisode,
+  unlockRemoteCharacter,
+  unlockRemoteVoiceProfile,
+  patchRemoteDialogueLine,
+  patchRemoteVoiceProfile,
+  patchRemoteCharacter,
+  setRemoteCanonical,
+  patchRemoteAsset,
+  patchRemoteCanvasNode,
+  patchRemoteEpisode,
+  patchRemoteProject,
+  patchRemoteScene,
+  patchRemoteShot,
+  patchRemoteStoryBible,
+  retryRemoteTask,
+  startRemoteAgentRun,
+  resumeRemoteAgentRun,
+  cancelRemoteAgentRun,
+  runRemoteTakeQC,
+  runRemoteShotQC,
+  runRemoteProjectQC,
+  runRemoteContinuityCheck,
+  saveRemoteProviderSettings,
+  testRemoteProviderSettings,
+  runRemoteCanvasNode,
+  listRemoteRunningHubWorkflows,
+  createRemoteRunningHubWorkflow,
+  patchRemoteRunningHubWorkflow,
+  deleteRemoteRunningHubWorkflow,
+  runRemoteRunningHubWorkflow,
+  uploadRemoteRunningHubFile,
+  discoverRemoteModels,
+} from "./apiClient.js";
 import {
   addShot,
   addStoryRule,
   cancelTask as cancelProjectTask,
-  completeGeneration,
   duplicateShot,
   getProjectStats,
   loadProject,
-  queueGeneration,
+  createEmptyProject,
   removeShot,
   removeStoryRule,
-  retryTask as retryProjectTask,
   saveProject,
   updateShot,
   updateStoryBible,
 } from "./projectStore.js";
 
-function formatTimestamp(date = new Date()) {
-  const pad = (value) => String(value).padStart(2, "0");
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+function EmptyWorkspace({ backendStatus, busy, onCreate }) {
+  return <div className="app-shell">
+    <Topbar project={createEmptyProject()} onSearch={() => {}} />
+    <div className="app-body">
+      <Sidebar activeNav="Agent" onNavigate={() => {}} />
+      <main className="content-shell">
+        <div className="module-page empty-workspace-page">
+          <section className="module-section empty-project-card">
+            <span className="section-kicker">EMPTY WORKSPACE</span>
+            <h1>当前没有项目</h1>
+            <p>预设项目已清空。先创建一个空白项目，再开始测试剧本、图片和视频流程。</p>
+            <small>{backendStatus === "online" ? "FastAPI 已连接，新的项目会保存到本地数据库。" : "FastAPI 未连接，请先启动后台服务。"}</small>
+            <button className="primary-action" type="button" disabled={busy || backendStatus !== "online"} onClick={onCreate}>{busy ? "创建中…" : "新建空白项目"}</button>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>;
 }
 
 function nextAssetId(items, prefix) {
@@ -33,12 +127,13 @@ function nextAssetId(items, prefix) {
 
 export function App() {
   const [project, setProject] = useState(() => loadProject());
-  const [activeNav, setActiveNav] = useState("概览");
+  const [activeNav, setActiveNav] = useState("Agent");
   const [selectedShotId, setSelectedShotId] = useState(() => loadProject().shots.find((shot) => shot.episodeId === loadProject().currentEpisodeId)?.id || null);
   const [searchOpen, setSearchOpen] = useState(false);
   const [toast, setToast] = useState(null);
   const [backendStatus, setBackendStatus] = useState("checking");
   const [providerInfo, setProviderInfo] = useState(null);
+  const [createProjectBusy, setCreateProjectBusy] = useState(false);
   const backendHydrated = useRef(false);
   const timers = useRef(new Map());
 
@@ -57,14 +152,12 @@ export function App() {
           if (active) setBackendStatus("offline");
           return;
         }
-        saveRemoteProject(project)
-          .then(() => {
-            backendHydrated.current = true;
-            if (active) setBackendStatus("online");
-          })
-          .catch(() => {
-            if (active) setBackendStatus("offline");
-          });
+        backendHydrated.current = true;
+        if (active) {
+          setProject(createEmptyProject());
+          setSelectedShotId(null);
+          setBackendStatus("online");
+        }
       });
     return () => { active = false; };
   }, []);
@@ -75,9 +168,6 @@ export function App() {
 
   useEffect(() => {
     saveProject(project);
-    if (backendStatus === "online" && backendHydrated.current) {
-      saveRemoteProject(project).catch(() => setBackendStatus("offline"));
-    }
   }, [project, backendStatus]);
 
   useEffect(() => () => { timers.current.forEach((timer) => window.clearTimeout(timer)); }, []);
@@ -89,16 +179,11 @@ export function App() {
     window.setTimeout(() => setToast(null), 2600);
   }, []);
 
-  const scheduleCompletion = useCallback((taskId, shotId) => {
-    const timer = window.setTimeout(() => {
-      setProject((current) => completeGeneration(current, taskId, formatTimestamp()));
-      timers.current.delete(taskId);
-      notify(`${shotId} 已生成新版本`);
-    }, 2200);
-    timers.current.set(taskId, timer);
-  }, [notify]);
+  const persist = useCallback((operation) => {
+    operation.catch(() => setBackendStatus("offline"));
+  }, []);
 
-  const pollRemoteGeneration = useCallback((taskId, shotId, attempt = 0) => {
+  const pollRemoteGeneration = useCallback((taskId, shotId, attempt = 0, onComplete, onFailure) => {
     const timer = window.setTimeout(async () => {
       try {
         const remoteProject = await getRemoteProject();
@@ -106,15 +191,19 @@ export function App() {
         setProject(remoteProject);
         if (task?.status === "Success") {
           timers.current.delete(taskId);
+          const asset = [...(remoteProject.assets?.characters || []), ...(remoteProject.assets?.locations || []), ...(remoteProject.assets?.props || [])].find((item) => item.id === task.targetId);
+          onComplete?.(asset, task, remoteProject);
           notify(`${shotId} 已生成新版本`);
           return;
         }
-        if (["Failed", "Cancelled"].includes(task?.status) || attempt >= 60) {
+        if (["Failed", "Cancelled"].includes(task?.status) || attempt >= REMOTE_POLL_MAX_ATTEMPTS) {
           timers.current.delete(taskId);
-          notify(`${shotId} 生成未完成，请在任务中心处理`, "error");
+          const failure = task || { status: "Failed", error: "任务轮询超时" };
+          onFailure?.(failure, remoteProject);
+          notify(failure.error ? `${shotId} 生成失败：${failure.error}` : `${shotId} 生成未完成，请在任务中心处理`, "error");
           return;
         }
-        pollRemoteGeneration(taskId, shotId, attempt + 1);
+        pollRemoteGeneration(taskId, shotId, attempt + 1, onComplete, onFailure);
       } catch {
         timers.current.delete(taskId);
         setBackendStatus("offline");
@@ -125,88 +214,506 @@ export function App() {
   }, [notify]);
 
   const generateShot = useCallback(async (shotId, prompt) => {
-    if (backendStatus === "online") {
-      try {
-        setToast({ message: `正在生成 ${shotId}…`, type: "loading" });
-        const response = await generateRemoteShot({ shotId, prompt });
-        setProject(response.project);
-        pollRemoteGeneration(response.task.id, shotId);
-        return;
-      } catch {
-        setBackendStatus("offline");
-        notify("后台连接失败，已切换本地演示生成", "error");
-      }
+    if (backendStatus !== "online") {
+      notify("FastAPI 未连接，视频任务未生成", "error");
+      return;
     }
-    const taskId = `T${Date.now()}`;
-    setProject((current) => queueGeneration(current, shotId, prompt, taskId, formatTimestamp()));
-    setToast({ message: `正在生成 ${shotId}…`, type: "loading" });
-    scheduleCompletion(taskId, shotId);
-  }, [backendStatus, notify, pollRemoteGeneration, scheduleCompletion]);
+    try {
+      setToast({ message: `正在生成 ${shotId}…`, type: "loading" });
+      const response = await generateRemoteShot({ shotId, prompt });
+      setProject(response.project);
+      pollRemoteGeneration(response.task.id, shotId);
+    } catch (error) {
+      setBackendStatus("offline");
+      notify(error?.message || "视频生成接口请求失败，任务未生成", "error");
+    }
+  }, [backendStatus, notify, pollRemoteGeneration]);
 
   const actions = {
+    notify,
     navigate: setActiveNav,
     backendStatus,
     providerInfo,
-    updateProject: (patch) => setProject((current) => ({ ...current, ...patch })),
-    updateStory: (field, value) => setProject((current) => updateStoryBible(current, field, value)),
-    addRule: (value) => setProject((current) => addStoryRule(current, value)),
-    removeRule: (index) => setProject((current) => removeStoryRule(current, index)),
+    updateProject: (patch) => {
+      setProject((current) => ({ ...current, ...patch }));
+      if (backendStatus === "online") persist(patchRemoteProject(patch));
+    },
+    updateStory: (field, value) => {
+      setProject((current) => updateStoryBible(current, field, value));
+      if (backendStatus === "online") persist(patchRemoteStoryBible({ [field]: value }));
+    },
+    loadScenes: (episodeId) => {
+      if (backendStatus === "online") return getRemoteScenes(episodeId);
+      if (episodeId === project.currentEpisodeId && project.currentScene) return Promise.resolve([{ ...project.currentScene, episodeId, order: project.currentScene.number, script: {} }]);
+      return Promise.resolve([]);
+    },
+    saveEpisode: (episodeId, patch) => {
+      setProject((current) => ({ ...current, episodes: current.episodes.map((episode) => episode.id === episodeId ? { ...episode, ...patch, hook: patch.hook ?? episode.hook, openingHook: patch.hook ?? episode.openingHook } : episode) }));
+      if (backendStatus === "online") return patchRemoteEpisode(episodeId, patch).then((episode) => {
+        setProject((current) => ({ ...current, episodes: current.episodes.map((item) => item.id === episodeId ? { ...item, ...episode } : item) }));
+        return episode;
+      });
+      return Promise.resolve({ ...project.episodes.find((episode) => episode.id === episodeId), ...patch });
+    },
+    generateMatrix: (episodeId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteMatrix(episodeId, payload).then((episode) => {
+        setProject((current) => ({ ...current, episodes: current.episodes.map((item) => item.id === episodeId ? { ...item, ...episode } : item) }));
+        return episode;
+      });
+    },
+    createScene: (episodeId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteScene(episodeId, payload);
+    },
+    generateAsset: (assetType, payload, onComplete, onFailure) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteAsset(assetType, payload).then((response) => {
+        const asset = response.asset;
+        setProject((current) => ({
+          ...current,
+          assets: {
+            ...current.assets,
+            [assetType]: current.assets[assetType].some((item) => item.id === asset.id)
+              ? current.assets[assetType].map((item) => item.id === asset.id ? asset : item)
+              : [...current.assets[assetType], asset],
+          },
+        }));
+        if (response.taskId) pollRemoteGeneration(response.taskId, asset.id, 0, onComplete, onFailure);
+        return response;
+      });
+    },
+    extractCharacterAnchors: (characterId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return extractRemoteAnchors(characterId).then(async (response) => {
+        setProject(await getRemoteProject());
+        notify("Identity Anchors 已提取");
+        return response;
+      });
+    },
+    generateCharacterCandidates: (characterId, payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteCandidates(characterId, payload).then((response) => {
+        getRemoteProject().then(setProject);
+        (response.taskIds || []).forEach((taskId) => pollRemoteGeneration(taskId, characterId));
+        notify(`已创建 ${response.count} 张候选人物图`);
+        return response;
+      });
+    },
+    generateCharacterMasterSheet: (characterId, payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteMasterSheet(characterId, payload).then((response) => {
+        getRemoteProject().then(setProject);
+        pollRemoteGeneration(response.taskId, characterId);
+        notify("Master Reference Sheet 已进入生成队列");
+        return response;
+      });
+    },
+    setCharacterCanonical: (characterId, referenceId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return setRemoteCanonical(characterId, referenceId).then((character) => {
+        setProject((current) => ({ ...current, assets: { ...current.assets, characters: current.assets.characters.map((item) => item.id === character.id ? character : item) } }));
+        notify("已选择 Canonical Reference");
+        return character;
+      });
+    },
+    reviewCharacterReference: (referenceId, approved) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return (approved ? approveRemoteReference(referenceId) : rejectRemoteReference(referenceId)).then(async (response) => {
+        setProject(await getRemoteProject());
+        notify(approved ? "参考图已审核通过" : "参考图已拒绝");
+        return response;
+      });
+    },
+    lockCharacter: (characterId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return lockRemoteCharacter(characterId).then(async (character) => {
+        setProject(await getRemoteProject());
+        notify("Identity 已锁定");
+        return character;
+      });
+    },
+    unlockCharacter: (characterId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return unlockRemoteCharacter(characterId).then(async (character) => {
+        setProject(await getRemoteProject());
+        notify("Identity 已解锁");
+        return character;
+      });
+    },
+    updateCharacter: (characterId, patch) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteCharacter(characterId, patch).then(async (character) => {
+        setProject(await getRemoteProject());
+        return character;
+      });
+    },
+    createCharacterLook: (characterId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteCharacterLook(characterId, payload).then(async (response) => {
+        setProject(await getRemoteProject());
+        notify("已添加角色造型");
+        return response;
+      });
+    },
+    createVoiceProfile: (characterId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteVoiceProfile(characterId, payload).then(async (profile) => {
+        setProject(await getRemoteProject());
+        notify("声音档案已创建");
+        return profile;
+      });
+    },
+    patchVoiceProfile: (profileId, patch) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteVoiceProfile(profileId, patch).then(async (profile) => {
+        setProject(await getRemoteProject());
+        return profile;
+      });
+    },
+    lockVoiceProfile: (profileId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return lockRemoteVoiceProfile(profileId).then(async (profile) => {
+        setProject(await getRemoteProject());
+        notify("声音身份已锁定");
+        return profile;
+      });
+    },
+    unlockVoiceProfile: (profileId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return unlockRemoteVoiceProfile(profileId).then(async (profile) => {
+        setProject(await getRemoteProject());
+        notify("声音身份已解锁");
+        return profile;
+      });
+    },
+    extractDialogueLines: (sceneId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return extractRemoteDialogueLines(sceneId).then(async (lines) => {
+        setProject(await getRemoteProject());
+        notify(`已提取 ${lines.length} 条台词`);
+        return lines;
+      });
+    },
+    patchDialogueLine: (lineId, patch) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteDialogueLine(lineId, patch).then(async (line) => {
+        setProject(await getRemoteProject());
+        return line;
+      });
+    },
+    directPerformance: (lineId, payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return directRemotePerformance(lineId, payload).then(async (performance) => {
+        setProject(await getRemoteProject());
+        notify("AI Voice Direction 已生成");
+        return performance;
+      });
+    },
+    generateDialogue: (lineId, payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteDialogueLine(lineId, payload).then((response) => {
+        pollRemoteGeneration(response.taskId, `台词 ${lineId}`);
+        notify("音频已进入持久任务队列");
+        return response;
+      });
+    },
+    generateEpisodeDialogue: (episodeId, payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteEpisodeDialogue(episodeId, payload).then((response) => {
+        (response.tasks || []).forEach((task) => pollRemoteGeneration(task.id, `台词 ${task.targetId || task.id}`));
+        notify(`已创建 ${response.count || 0} 个音频任务`);
+        return response;
+      });
+    },
+    runTakeQC: (takeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return runRemoteTakeQC(takeId).then(async (result) => {
+        setProject(await getRemoteProject());
+        notify(`音频 QC ${result.status === "pass" ? "通过" : "需要复核"}`);
+        return result;
+      });
+    },
+    activateTake: (takeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return activateRemoteTake(takeId).then(async (take) => {
+        setProject(await getRemoteProject());
+        notify("已启用该版音频");
+        return take;
+      });
+    },
+    createAudioClip: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteAudioClip(payload).then(async (clip) => {
+        setProject(await getRemoteProject());
+        return clip;
+      });
+    },
+    patchAudioClip: (clipId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteAudioClip(clipId, payload).then(async (clip) => {
+        setProject(await getRemoteProject());
+        return clip;
+      });
+    },
+    deleteAudioClip: (clipId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return deleteRemoteAudioClip(clipId).then(async (result) => {
+        setProject(await getRemoteProject());
+        notify("时间线片段已删除");
+        return result;
+      });
+    },
+    createVideoClip: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteVideoClip(payload).then(async (clip) => {
+        setProject(await getRemoteProject());
+        return clip;
+      });
+    },
+    patchVideoClip: (clipId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteVideoClip(clipId, payload).then(async (clip) => {
+        setProject(await getRemoteProject());
+        return clip;
+      });
+    },
+    deleteVideoClip: (clipId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return deleteRemoteVideoClip(clipId).then(async (result) => {
+        setProject(await getRemoteProject());
+        notify("视频片段已移出时间线");
+        return result;
+      });
+    },
+    mixdownEpisode: (episodeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return mixdownRemoteEpisode(episodeId).then(async (mixdown) => {
+        setProject(await getRemoteProject());
+        notify("本集混音已生成");
+        return mixdown;
+      });
+    },
+    renderEpisode: (episodeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return renderRemoteEpisode(episodeId).then(async (render) => {
+        setProject(await getRemoteProject());
+        if (render.status === "blocked") notify(render.error || "MP4 渲染环境未就绪", "error");
+        else if (render.status === "ready") notify("MP4 已渲染完成");
+        else notify(`MP4 渲染状态：${render.status}`);
+        return render;
+      });
+    },
+    getProviderSettings: () => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return getRemoteProviderSettings();
+    },
+    saveProviderSettings: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return saveRemoteProviderSettings(payload).then((settings) => {
+        getRemoteHealth().then(setProviderInfo).catch(() => {});
+        notify("API 配置已保存，新的任务会立即使用");
+        return settings;
+      });
+    },
+    testProviderSettings: (payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return testRemoteProviderSettings(payload);
+    },
+    discoverModels: (payload = {}) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return discoverRemoteModels(payload);
+    },
+    getCanvas: () => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return getRemoteCanvas();
+    },
+    createCanvasNode: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteCanvasNode(payload);
+    },
+    patchCanvasNode: (nodeId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteCanvasNode(nodeId, payload);
+    },
+    deleteCanvasNode: (nodeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return deleteRemoteCanvasNode(nodeId);
+    },
+    createCanvasEdge: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteCanvasEdge(payload);
+    },
+    deleteCanvasEdge: (edgeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return deleteRemoteCanvasEdge(edgeId);
+    },
+    runCanvasNode: (nodeId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return runRemoteCanvasNode(nodeId, payload);
+    },
+    getRunningHubWorkflows: () => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return listRemoteRunningHubWorkflows();
+    },
+    createRunningHubWorkflow: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return createRemoteRunningHubWorkflow(payload);
+    },
+    patchRunningHubWorkflow: (workflowId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteRunningHubWorkflow(workflowId, payload);
+    },
+    deleteRunningHubWorkflow: (workflowId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return deleteRemoteRunningHubWorkflow(workflowId);
+    },
+    runRunningHubWorkflow: (workflowId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return runRemoteRunningHubWorkflow(workflowId, payload).then(async (response) => {
+        setProject(await getRemoteProject());
+        return response;
+      });
+    },
+    uploadRunningHubFile: (file) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return uploadRemoteRunningHubFile(file);
+    },
+    startAgentRun: (payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return startRemoteAgentRun(payload);
+    },
+    getAgentRun: (runId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return getRemoteAgentRun(runId);
+    },
+    listAgentRuns: (episodeId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return listRemoteAgentRuns(episodeId);
+    },
+    resumeAgentRun: (runId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return resumeRemoteAgentRun(runId);
+    },
+    cancelAgentRun: (runId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return cancelRemoteAgentRun(runId);
+    },
+    runShotQC: (shotId) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return runRemoteShotQC(shotId).then(async (result) => {
+        setProject(await getRemoteProject());
+        return result;
+      });
+    },
+    runProjectQC: () => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return runRemoteProjectQC().then(async (result) => {
+        setProject(await getRemoteProject());
+        return result;
+      });
+    },
+    runContinuityCheck: () => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return runRemoteContinuityCheck().then(async (result) => {
+        setProject(await getRemoteProject());
+        return result;
+      });
+    },
+    saveScene: (sceneId, patch) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return patchRemoteScene(sceneId, patch);
+    },
+    generateSceneScript: (sceneId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteSceneScript(sceneId, payload);
+    },
+    generateBreakdown: (sceneId, payload) => {
+      if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
+      return generateRemoteBreakdown(sceneId, payload).then(async (response) => {
+        const remoteProject = await getRemoteProject();
+        setProject(remoteProject);
+        return response.items || [];
+      });
+    },
+    addRule: (value) => {
+      const next = addStoryRule(project, value);
+      setProject(next);
+      if (backendStatus === "online" && next !== project) persist(patchRemoteStoryBible({ rules: next.storyBible.rules }));
+    },
+    removeRule: (index) => {
+      const next = removeStoryRule(project, index);
+      setProject(next);
+      if (backendStatus === "online") persist(patchRemoteStoryBible({ rules: next.storyBible.rules }));
+    },
     openEpisode: (episodeId) => {
       const firstShot = project.shots.find((shot) => shot.episodeId === episodeId);
       setProject((current) => ({ ...current, currentEpisodeId: episodeId }));
       setSelectedShotId(firstShot?.id || null);
+      if (backendStatus === "online") persist(patchRemoteProject({ currentEpisodeId: episodeId }));
       setActiveNav("分镜");
     },
     addAsset: (type) => {
       const config = {
-        characters: { prefix: "C", name: "新角色", meta: "待完善", image: "/assets/shot-hero.png" },
-        locations: { prefix: "L", name: "新场景", meta: "待完善", image: "/assets/shot-wide.png" },
-        props: { prefix: "P", name: "新道具", meta: "待完善", image: "/assets/shot-woman.png" },
+        characters: { prefix: "C", name: "新角色", meta: "待完善" },
+        locations: { prefix: "L", name: "新场景", meta: "待完善" },
+        props: { prefix: "P", name: "新道具", meta: "待完善" },
       }[type];
-      setProject((current) => {
-        const items = current.assets[type];
-        const item = { id: nextAssetId(items, config.prefix), name: config.name, meta: config.meta, description: "点击编辑资产描述。", image: config.image, status: "待确认" };
-        return { ...current, assets: { ...current.assets, [type]: [...items, item] } };
-      });
+      const item = { id: nextAssetId(project.assets[type], config.prefix), name: config.name, meta: config.meta, description: "点击编辑资产描述。", image: null, status: "待确认" };
+      setProject((current) => ({ ...current, assets: { ...current.assets, [type]: [...current.assets[type], item] } }));
+      if (backendStatus === "online") persist(createRemoteAsset(type, item));
       notify("已创建新资产");
     },
-    updateAsset: (type, id, patch) => setProject((current) => ({ ...current, assets: { ...current.assets, [type]: current.assets[type].map((item) => item.id === id ? { ...item, ...patch } : item) } })),
+    updateAsset: (type, id, patch) => {
+      setProject((current) => ({ ...current, assets: { ...current.assets, [type]: current.assets[type].map((item) => item.id === id ? { ...item, ...patch } : item) } }));
+      if (backendStatus === "online") persist(patchRemoteAsset(id, patch));
+    },
     cancelTask: (taskId) => {
       const timer = timers.current.get(taskId);
       if (timer) window.clearTimeout(timer);
       timers.current.delete(taskId);
       setProject((current) => cancelProjectTask(current, taskId));
+      if (backendStatus === "online") persist(cancelRemoteTask(taskId).then((response) => setProject(response.project)));
       notify("任务已取消");
     },
     retryTask: (taskId) => {
       const source = project.tasks.find((task) => task.id === taskId);
       if (!source) return;
       if (backendStatus === "online") {
-        generateShot(source.shotId, project.shots.find((shot) => shot.id === source.shotId)?.prompt || "");
+        retryRemoteTask(taskId).then((response) => {
+          setProject(response.project);
+          pollRemoteGeneration(response.task.id, source.shotId);
+        }).catch(() => {
+          setBackendStatus("offline");
+          notify("重试任务失败", "error");
+        });
         return;
       }
-      const nextTaskId = `T${Date.now()}`;
-      setProject((current) => retryProjectTask(current, taskId, nextTaskId, formatTimestamp()));
-      setToast({ message: `正在重试 ${source.shotId}…`, type: "loading" });
-      scheduleCompletion(nextTaskId, source.shotId);
+      notify("FastAPI 未连接，无法重试视频任务", "error");
     },
-    reviewShot: (shotId) => setProject((current) => {
-      const shot = current.shots.find((item) => item.id === shotId);
-      return updateShot(current, shotId, { reviewed: !shot?.reviewed });
-    }),
+    reviewShot: (shotId) => {
+      const shot = project.shots.find((item) => item.id === shotId);
+      const reviewed = !shot?.reviewed;
+      setProject((current) => updateShot(current, shotId, { reviewed }));
+      if (backendStatus === "online") persist(patchRemoteShot(shotId, { reviewed }));
+    },
     regenerateShot: (shotId) => {
       const shot = project.shots.find((item) => item.id === shotId);
       if (shot) generateShot(shotId, shot.prompt);
     },
-    exportProject: () => {
-      const blob = new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = `${project.title}-project.json`;
-      link.click();
-      URL.revokeObjectURL(url);
-      notify("项目包已导出");
+    exportProject: async () => {
+      try {
+        const blob = backendStatus === "online" ? await exportRemoteProject() : new Blob([JSON.stringify(project, null, 2)], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = backendStatus === "online" ? `${project.title}-project-package.zip` : `${project.title}-project.json`;
+        link.click();
+        URL.revokeObjectURL(url);
+        notify("项目包已导出");
+      } catch {
+        notify("导出失败，请稍后重试", "error");
+      }
     },
   };
 
@@ -214,6 +721,7 @@ export function App() {
     const result = addShot(project);
     setProject(result.project);
     setSelectedShotId(result.shot.id);
+    if (backendStatus === "online") persist(createRemoteShot(result.shot.sceneId, result.shot));
     notify(`已添加 ${result.shot.id}`);
   };
 
@@ -222,6 +730,7 @@ export function App() {
     if (!result.shot) return;
     setProject(result.project);
     setSelectedShotId(result.shot.id);
+    if (backendStatus === "online") persist(createRemoteShot(result.shot.sceneId, result.shot));
     notify(`已复制为 ${result.shot.id}`);
   };
 
@@ -232,6 +741,7 @@ export function App() {
     const nextShot = nextProject.shots[Math.min(currentIndex, nextProject.shots.length - 1)];
     setProject(nextProject);
     setSelectedShotId(nextShot?.id || null);
+    if (backendStatus === "online") persist(deleteRemoteShot(shotId));
     notify(`${shotId} 已删除`);
   };
 
@@ -239,6 +749,7 @@ export function App() {
     const firstShot = project.shots.find((shot) => shot.episodeId === episodeId);
     setProject((current) => ({ ...current, currentEpisodeId: episodeId }));
     setSelectedShotId(firstShot?.id || null);
+    if (backendStatus === "online") persist(patchRemoteProject({ currentEpisodeId: episodeId }));
   };
 
   const openSearchResult = (result) => {
@@ -257,12 +768,30 @@ export function App() {
     setSearchOpen(false);
   };
 
+  const createBlankProject = async () => {
+    if (createProjectBusy || backendStatus !== "online") return;
+    setCreateProjectBusy(true);
+    try {
+      const next = await createRemoteProject({ id: "P001", title: "未命名短剧", status: "策划中", targetEpisodes: 1, currentEpisodeId: "EP01" });
+      setProject(next);
+      setSelectedShotId(null);
+      backendHydrated.current = true;
+      notify("空白项目已创建");
+    } catch (error) {
+      notify(error?.message || "创建项目失败", "error");
+    } finally {
+      setCreateProjectBusy(false);
+    }
+  };
+
+  if (!project.id) return <EmptyWorkspace backendStatus={backendStatus} busy={createProjectBusy} onCreate={createBlankProject} />;
+
   return (
     <div className="app-shell">
       <Topbar project={project} onSearch={() => setSearchOpen(true)} />
       <div className="app-body">
         <Sidebar activeNav={activeNav} onNavigate={setActiveNav} />
-        <main className={`content-shell ${activeNav === "分镜" ? "storyboard-mode" : ""}`}>
+        <main className={`content-shell ${activeNav === "分镜" ? "storyboard-mode" : activeNav === "画布" ? "canvas-mode" : ""}`}>
           {activeNav === "分镜" ? (
             <StoryboardWorkspace
               project={project}
@@ -271,12 +800,18 @@ export function App() {
               onAddShot={addNewShot}
               onDuplicateShot={duplicateCurrentShot}
               onDeleteShot={deleteCurrentShot}
-              onUpdateShot={(shotId, patch) => setProject((current) => updateShot(current, shotId, patch))}
-              onUpdateScene={(patch) => setProject((current) => ({ ...current, currentScene: { ...current.currentScene, ...patch } }))}
+              onUpdateShot={(shotId, patch) => {
+                setProject((current) => updateShot(current, shotId, patch));
+                if (backendStatus === "online") persist(patchRemoteShot(shotId, patch));
+              }}
+              onUpdateScene={(patch) => {
+                setProject((current) => ({ ...current, currentScene: { ...current.currentScene, ...patch } }));
+                if (backendStatus === "online" && project.currentScene?.id) persist(patchRemoteScene(project.currentScene.id, patch));
+              }}
               onGenerate={generateShot}
               onEpisodeChange={changeEpisode}
             />
-          ) : <ModulePage activeNav={activeNav} project={project} stats={stats} actions={actions} />}
+          ) : activeNav === "画布" ? <CanvasPage project={project} actions={actions} /> : activeNav === "工作流" ? <RunningHubPage project={project} actions={actions} /> : <ModulePage activeNav={activeNav} project={project} stats={stats} actions={actions} />}
         </main>
       </div>
       <SearchDialog open={searchOpen} project={project} onClose={() => setSearchOpen(false)} onOpenResult={openSearchResult} />

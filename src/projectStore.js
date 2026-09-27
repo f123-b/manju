@@ -1,9 +1,13 @@
-import { initialProject } from "./projectData.js";
+import { emptyProject } from "./projectData.js";
 
 export const STORAGE_KEY = "short-drama-os.project.v1";
 
-export function cloneProject(project = initialProject) {
+export function cloneProject(project = emptyProject) {
   return JSON.parse(JSON.stringify(project));
+}
+
+export function createEmptyProject() {
+  return cloneProject(emptyProject);
 }
 
 export function loadProject(storage = globalThis.localStorage) {
@@ -12,7 +16,8 @@ export function loadProject(storage = globalThis.localStorage) {
     const saved = storage.getItem(STORAGE_KEY);
     if (!saved) return cloneProject();
     const parsed = JSON.parse(saved);
-    return parsed?.schemaVersion === 1 ? parsed : cloneProject();
+    if (parsed?.id === "P001" && parsed?.title === "重生之后我不当舔狗了") return cloneProject();
+    return parsed?.schemaVersion >= 1 ? parsed : cloneProject();
   } catch {
     return cloneProject();
   }

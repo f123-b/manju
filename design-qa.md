@@ -1,54 +1,45 @@
-# Short Drama OS · Design QA
+# Model and API settings design QA
 
-## Source
+## Source visual truth
 
-- Source visual truth: `C:\Users\lenovo\AppData\Local\Temp\codex-clipboard-091450c1-60c2-4b0f-b98e-fdfa76714973.png`
-- Source pixels: 1487 × 1021.
-- Intended state: desktop storyboard workspace, EP08 / Scene 3 / SH041 selected.
+- `C:\Users\lenovo\AppData\Local\Temp\codex-clipboard-4de69c76-2afa-4409-8ed4-49e10ad7b591.png` — service list screen.
+- `C:\Users\lenovo\AppData\Local\Temp\codex-clipboard-7c3e002a-b48b-4ba5-8e2d-8aa09fcfd3d0.png` — add model service modal.
 
-## Implementation Evidence
+## Implementation evidence
 
-- Implementation URL: `http://127.0.0.1:4173/`
-- Browser: Codex In-app Browser.
-- Implementation capture: inline browser screenshot captured at 1487 × 1021 CSS pixels, device scale factor 1. The browser capture API does not expose a filesystem path for the screenshot.
-- Final state: EP08 / Scene 3 / SH041 selected, light theme, default inspector tab.
-- Console errors: none reported by the browser console.
+- URL: `http://127.0.0.1:8000/`
+- Browser: Codex In-app Browser, desktop viewport.
+- Implementation capture: inline CUA browser capture, 1017 × 897 px. The browser capture API exposes the image inline rather than a filesystem path.
+- States checked: model service list with an existing media Provider; add model service modal in its default LLM state; modal close action.
 
-## Full-view Comparison
+## Comparison
 
-The final implementation preserves the source composition: fixed top project context, narrow navigation rail, shot list, large cinematic preview, storyboard strip, scene note, and right-side inspector with a fixed generation footer. The major regions align at the same viewport size and the production-software visual language is retained with light surfaces, thin borders, muted blue action color, and compact Chinese labels.
+The implementation preserves the existing product shell and global navigation while matching the selected reference's core settings anatomy: a large Model & API heading, summary pills, rounded provider cards, service status, edit/delete actions, a prominent add-service action, and a scrollable add-service modal with Base URL, API key, connection test, model discovery, routing, and save actions.
 
-## Focused Region Comparison
+### Required fidelity surfaces
 
-- Left rail: shot cards use the same selected-state border, thumbnail-led hierarchy, metadata order, and scene grouping.
-- Center workspace: SH041 title, review action, tall preview, player controls, tabs, four storyboard frames, and scene synopsis follow the source anatomy.
-- Right inspector: camera settings, character cards, outfits, prompt editor, cost/QC estimate, and primary generation CTA remain in the same order.
+- Fonts and typography: Inter plus Noto Sans SC matches the existing product shell; compact labels, service names, and modal hierarchy are readable at the captured desktop size.
+- Spacing and layout rhythm: provider cards use the reference's generous padding, rounded corners, thin dividers, and separated modal footer; the project settings block is intentionally secondary.
+- Colors and visual tokens: cobalt blue actions, pale blue/violet service icons, green connected states, white cards, and restrained gray-blue copy match the reference direction.
+- Image quality and asset fidelity: the reference contains UI icons only; the implementation uses the existing Phosphor icon system rather than raster or CSS approximations.
+- Copy and content: service name, Base URL, API Key, model routing, model discovery, connection testing, and secure local storage copy are present in Chinese and map to real actions.
 
 ## Findings
 
-- No actionable P0/P1/P2 visual findings remain.
-- P3 follow-up: the generated drama stills and the icon-based brand mark are close in art direction but are not the exact raster assets from the reference image.
+- No actionable P0/P1/P2 visual findings remain after the final pass.
+- P3 / intentional deviation: the existing product's global left navigation remains visible instead of adding a second settings-only navigation rail from the reference. This keeps navigation consistent across the app and avoids duplicate navigation.
 
-## Comparison History
+## Interaction checks
 
-1. Initial comparison found a P2 layout drift: the preview was 16:9 and left the storyboard and scene note too high. Fixed by matching the taller reference proportion at `aspect-ratio: 1.25 / 1`.
-2. Second comparison found a P2 overflow issue: the inspector footer was below the viewport because the grid track used the content minimum height. Fixed with a constrained grid row and `min-height: 0` on the three workbench columns so the generation CTA stays visible.
-3. Final comparison found a P3 brand-lockup wrap. Fixed by tightening the brand mark spacing and wordmark size so “Short Drama OS” stays on one line.
+- Opened 设置 and verified the new Model & API screen.
+- Opened 添加模型服务 and verified the LLM / Agent and 图片 / 视频 type choices, routing fields, disabled empty-state actions, and save footer.
+- Closed the modal and returned to the provider list.
+- Existing API tests, model discovery, and provider persistence tests all pass.
 
-## Primary Interactions Tested
+## Comparison history
 
-- Selecting SH043 updates the active shot and central preview.
-- Clicking the 画面尺寸 control cycles the value to the next option.
-- Switching to the 角色 inspector tab shows the alternate inspector state.
-- Clicking 生成此镜头 shows a running toast and then a submitted-success state.
-- Reloading restores the intended default SH041 state.
-
-## Implementation Checklist
-
-- [x] Source and implementation compared at the same desktop viewport.
-- [x] Five required fidelity surfaces reviewed: typography, spacing/layout, colors/tokens, imagery/assets, and copy/content.
-- [x] P0/P1/P2 findings fixed and rechecked.
-- [x] Production build passes.
-- [x] Sites packaging tests pass.
+1. Initial implementation: provider cards and modal were visually aligned; the current-service summary treated only one provider kind as current.
+2. Fix: current status now reports LLM and generation services independently, matching the backend's separate routing semantics; the non-persistent “set current” affordance was removed.
+3. Final inline browser capture: no actionable P0/P1/P2 findings.
 
 final result: passed

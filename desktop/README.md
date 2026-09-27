@@ -14,3 +14,7 @@
 4. 再次启动桌面预览版。
 
 停止服务可双击 `停止桌面预览版.bat`。
+
+## 生成可复制的预览包
+
+在项目根目录运行 `npm.cmd run desktop:package`，或双击 `BUILD_PREVIEW_PACKAGE.bat`。脚本会先构建前端，再生成 `desktop-artifacts/Short-Drama-OS-Preview-*.zip`。解压后进入 `desktop` 双击 `START_PREVIEW.bat` 即可启动，不会携带当前项目的数据库、生成媒体或 API Key。

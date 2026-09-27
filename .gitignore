@@ -2,8 +2,18 @@ node_modules/
 .npm-cache/
 dist/
 data/*.sqlite3
+data/.secret-key
+data/generated-audio/
+data/generated-video/
 .env
+desktop-artifacts/
 __pycache__/
 *.pyc
 .pytest_cache/
 .DS_Store
+
+# External reference packs contain nested Git repositories and downloaded sources.
+manju_audio_engine_integration_pack/
+manju_audio_engine_integration_pack.zip
+manju_character_engine_integration_pack/
+manju_character_engine_integration_pack.zip
