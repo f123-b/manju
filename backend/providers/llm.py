@@ -130,6 +130,9 @@ class LLMProvider:
     async def complete_json(self, system: str, user: str) -> dict[str, Any]:
         return await asyncio.to_thread(self._request, system, user)
 
+    def complete_json_sync(self, system: str, user: str) -> dict[str, Any]:
+        return self._request(system, user)
+
     def complete_vision_json_sync(self, system: str, user: str, image: str | Path) -> dict[str, Any]:
         """Synchronous vision call for the synchronous QC transaction."""
         return self._request_vision(system, user, image)

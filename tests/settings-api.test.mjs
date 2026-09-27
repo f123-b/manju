@@ -65,6 +65,17 @@ test("provider settings persist safely and test a configured endpoint", async (t
   assert.equal(health.providers.video.model, "mock-video");
   assert.equal(health.providers.llm.configured, false);
 
+  const placeholderResponse = await fetch(`${base}/api/settings/providers`, {
+    method: "PATCH",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ providerUrl: "https://blankapi.com/v1", providerName: "Example Provider", providerModel: "gpt-image-2", providerImageModel: "gpt-image-2", providerVideoModel: "video-model" }),
+  });
+  assert.equal(placeholderResponse.ok, true);
+  const placeholderHealth = await (await fetch(`${base}/api/health`)).json();
+  assert.equal(placeholderHealth.mode, "demo");
+  assert.equal(placeholderHealth.providers.image.configured, false);
+  assert.equal(placeholderHealth.providers.video.configured, false);
+
   const sessionResponse = await fetch(`${base}/api/session`);
   const session = await sessionResponse.json();
   assert.equal(sessionResponse.ok, true);

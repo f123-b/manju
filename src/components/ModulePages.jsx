@@ -334,6 +334,8 @@ function AssetGenerationPage({ project, actions }) {
         meta: currentConfig.meta,
         role: assetType === "characters" ? "主要角色" : undefined,
         status: "已生成",
+      }, (completedAsset) => {
+        if (completedAsset) setGenerated(completedAsset);
       });
       setGenerated(response.asset);
       setNotice(`已生成 ${response.asset.id}，预计消耗 ¥${Number(response.cost || 0.18).toFixed(2)}`);
@@ -345,7 +347,7 @@ function AssetGenerationPage({ project, actions }) {
   };
 
   return <div className="module-page asset-generator-page">
-    <PageHeader eyebrow="Asset Generator" title="人物与场景生图" description="先建立可复用的视觉资产，后续 Agent 和镜头生成会统一引用它们。" action={<span className={`agent-runtime ${actions.backendStatus}`}>{actions.backendStatus === "online" ? "Image API 已连接" : "等待 API"}</span>} />
+    <PageHeader eyebrow="Asset Generator" title="人物与场景生图" description="先建立可复用的视觉资产，后续 Agent 和镜头生成会统一引用它们。" action={<span className={`agent-runtime ${actions.backendStatus}`}>{actions.backendStatus !== "online" ? "等待 API" : actions.providerInfo?.mode === "remote" ? "Image API 已连接" : "本地演示已连接"}</span>} />
     <div className="asset-generator-layout">
       <section className="module-section asset-generator-form">
         <div className="section-heading"><div><h2>生成设置</h2><p>把文字描述变成项目资产。</p></div><Sparkle size={23} weight="duotone" /></div>

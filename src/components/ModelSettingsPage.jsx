@@ -17,6 +17,8 @@ const EMPTY_SETTINGS = {
   providerUrl: "",
   providerName: "External Video API",
   providerModel: "video-default",
+  providerImageModel: "",
+  providerVideoModel: "",
   providerApiKey: "",
   apiKeySet: false,
   llmProviderUrl: "",
@@ -78,7 +80,9 @@ function providerDraft(settings, kind) {
     url: settings.providerUrl || "",
     apiKey: "",
     apiKeySet: Boolean(settings.apiKeySet),
-    defaultModel: settings.providerModel || "",
+    defaultModel: settings.providerImageModel || settings.providerModel || "",
+    imageModel: settings.providerImageModel || settings.providerModel || "",
+    videoModel: settings.providerVideoModel || "",
     visionModel: "",
   };
 }
@@ -96,7 +100,9 @@ function providerPayload(draft) {
   return {
     providerName: draft.name,
     providerUrl: draft.url,
-    providerModel: draft.defaultModel,
+    providerModel: draft.imageModel || draft.defaultModel,
+    providerImageModel: draft.imageModel || draft.defaultModel,
+    providerVideoModel: draft.videoModel || "",
     ...(draft.apiKey ? { providerApiKey: draft.apiKey } : {}),
   };
 }
@@ -152,13 +158,14 @@ function ServiceCard({ kind, settings, catalog, active, onEdit, onDelete }) {
   const url = kind === "llm" ? settings.llmProviderUrl : settings.providerUrl;
   const model = kind === "llm" ? settings.llmModel : settings.providerModel;
   const visionModel = kind === "llm" ? settings.llmVisionModel : "";
+  const videoModel = kind === "media" ? settings.providerVideoModel : "";
   return <article className={`model-service-card ${active ? "is-active" : ""} ${!configured ? "is-empty" : ""}`}>
     <div className={`service-icon ${copy.color}`}><Icon size={24} weight="duotone" /></div>
     <div className="service-card-main">
       <div className="service-card-title"><h3>{name || copy.label}</h3><span>{copy.typeLabel}</span>{active && <em><CheckCircle size={14} weight="fill" />当前使用</em>}</div>
       <p>{configured ? url : `还没有配置${copy.label}服务`}</p>
       {configured ? <>
-        <div className="service-card-meta"><span>{catalog ? `${catalog.count} 个配置模型` : "模型目录未读取"}</span><span>默认：{model || "未选择"}</span>{visionModel && <span>视觉：{visionModel}</span>}</div>
+        <div className="service-card-meta"><span>{catalog ? `${catalog.count} 个配置模型` : "模型目录未读取"}</span><span>默认：{model || "未选择"}</span>{videoModel && <span>视频：{videoModel}</span>}{visionModel && <span>视觉：{visionModel}</span>}</div>
         <div className="service-card-status"><CheckCircle size={15} weight="fill" />{copy.description}</div>
       </> : <div className="service-card-status muted">点击“添加模型服务”开始配置</div>}
     </div>
@@ -181,7 +188,7 @@ function ModelServiceModal({ draft, catalog, busy, notice, onChange, onTest, onD
         <div className="service-type-options"><button type="button" className={draft.kind === "llm" ? "is-selected" : ""} onClick={() => onChange({ kind: "llm", ...providerDraft({ llmProviderName: draft.name, llmProviderUrl: draft.url, llmModel: draft.defaultModel, llmVisionModel: draft.visionModel, llmApiKeySet: draft.apiKeySet }, "llm") })}><Sparkle size={18} /><strong>LLM / Agent</strong><small>文本、视觉与结构化输出</small></button><button type="button" className={draft.kind === "media" ? "is-selected" : ""} onClick={() => onChange({ kind: "media", ...providerDraft({ providerName: draft.name, providerUrl: draft.url, providerModel: draft.defaultModel, apiKeySet: draft.apiKeySet }, "media") })}><LinkSimple size={18} /><strong>图片 / 视频</strong><small>人物图、场景图与视频生成</small></button></div>
         <div className="modal-field-grid"><label className="modal-field"><span>{draft.kind === "media" ? "Base URL / 生成地址" : "Base URL"}</span><input value={draft.url} onChange={(event) => onChange({ url: event.target.value })} placeholder={draft.kind === "llm" ? "https://api.openai.com/v1" : "https://api.example.com/v1"} />{draft.kind === "media" && draft.url && <small className="endpoint-preview">实际提交：{generationEndpointPreview(draft)}</small>}</label><label className="modal-field"><span>API Key <i>仅保存在本机</i></span><input type="password" value={draft.apiKey} onChange={(event) => onChange({ apiKey: event.target.value })} placeholder={draft.apiKeySet ? "已保存密钥，留空保持不变" : "输入 API Key"} autoComplete="off" /></label></div>
         <div className="modal-actions"><button type="button" onClick={onTest} disabled={busy || !draft.url}><Check size={17} />测试连接</button><button type="button" onClick={onDiscover} disabled={busy || !draft.url}><ArrowsClockwise size={17} />{busy === "discover" ? "获取中…" : "获取模型"}</button><span>{busy === "test" ? "测试中…" : notice || "新配置未保存"}</span></div>
-        <section className="model-routing-section"><div className="routing-heading"><div><span className="settings-kicker">MODEL ROUTING</span><h3>核心模型</h3><p>只需配置默认模型；视觉模型用于 QC 和图像理解。</p></div><strong>{catalog ? `已获取 ${catalog.count} 个模型` : "尚未获取目录"}</strong></div><div className="model-route-grid"><ModelPicker label="默认模型" value={draft.defaultModel} onChange={(value) => onChange({ defaultModel: value })} catalog={catalog} hint="Agent、文本或通用生成任务" />{draft.kind === "llm" && <ModelPicker label="视觉模型" value={draft.visionModel} onChange={(value) => onChange({ visionModel: value })} catalog={catalog} category="vision" hint="仅显示支持图像输入的 VL / vision 模型" />}</div><CatalogPreview catalog={catalog} /></section>
+        <section className="model-routing-section"><div className="routing-heading"><div><span className="settings-kicker">MODEL ROUTING</span><h3>核心模型</h3><p>{draft.kind === "media" ? "图片和视频分别选择模型，避免把图片模型提交到视频接口。" : "只需配置默认模型；视觉模型用于 QC 和图像理解。"}</p></div><strong>{catalog ? `已获取 ${catalog.count} 个模型` : "尚未获取目录"}</strong></div><div className="model-route-grid">{draft.kind === "media" ? <><ModelPicker label="图片模型" value={draft.imageModel || draft.defaultModel} onChange={(value) => onChange({ imageModel: value, defaultModel: value })} catalog={catalog} category="image" hint="用于人物图和场景图" /><ModelPicker label="视频模型" value={draft.videoModel} onChange={(value) => onChange({ videoModel: value })} catalog={catalog} category="video" hint="用于分镜视频生成；没有时可手动填写" /></> : <><ModelPicker label="默认模型" value={draft.defaultModel} onChange={(value) => onChange({ defaultModel: value })} catalog={catalog} hint="Agent、文本或通用生成任务" /><ModelPicker label="视觉模型" value={draft.visionModel} onChange={(value) => onChange({ visionModel: value })} catalog={catalog} category="vision" hint="仅显示支持图像输入的 VL / vision 模型" /></>}</div><CatalogPreview catalog={catalog} /></section>
         {draft.kind === "media" && <div className="modal-tip"><Sparkle size={17} /><span>通用图片/视频接口需要填写实际 POST 生成地址，不是网站首页。若返回 task_id，请在保存后补充异步状态地址。</span></div>}
       </div>
       <footer className="model-modal-footer"><button type="button" onClick={onClose}>取消</button><button type="button" className="primary-action" onClick={onSave} disabled={busy || !draft.url}>{busy === "save" ? "保存中…" : "保存并设为当前"}<Plus size={17} /></button></footer>
@@ -253,10 +260,17 @@ export function ModelSettingsPage({ project, onUpdateProject, backendStatus, pro
       const recommended = result.recommended || {};
       const allModels = modelList(result);
       const visionModels = modelList(result, "vision");
-      setDraft((current) => ({
+      const imageModels = modelList(result, "image");
+      const videoModels = modelList(result, "video");
+      setDraft((current) => current.kind === "media" ? ({
+        ...current,
+        imageModel: current.imageModel && imageModels.includes(current.imageModel) ? current.imageModel : recommended.image || imageModels[0] || current.defaultModel || allModels[0] || "",
+        videoModel: current.videoModel && videoModels.includes(current.videoModel) ? current.videoModel : recommended.video || videoModels[0] || "",
+        defaultModel: current.imageModel && imageModels.includes(current.imageModel) ? current.imageModel : recommended.image || imageModels[0] || current.defaultModel || allModels[0] || "",
+      }) : ({
         ...current,
         defaultModel: current.defaultModel && allModels.includes(current.defaultModel) ? current.defaultModel : recommended.text || recommended.image || recommended.video || allModels[0] || "",
-        visionModel: current.kind === "llm" && current.visionModel && visionModels.includes(current.visionModel) ? current.visionModel : recommended.vision || "",
+        visionModel: current.visionModel && visionModels.includes(current.visionModel) ? current.visionModel : recommended.vision || "",
       }));
       setModalNotice(`已发现 ${result.count} 个模型，并自动完成分类。`);
     } catch (error) {
@@ -304,7 +318,7 @@ export function ModelSettingsPage({ project, onUpdateProject, backendStatus, pro
     const label = isLLM ? settings.llmProviderName : settings.providerName;
     setBusy(`delete-${kind}`);
     try {
-      const next = await actions.saveProviderSettings(isLLM ? { llmProviderUrl: "", llmProviderName: "OpenAI Compatible", llmModel: "gpt-4o-mini", llmVisionModel: "", llmApiKey: "__CLEAR__" } : { providerUrl: "", providerName: "External Video API", providerModel: "video-default", providerApiKey: "__CLEAR__" });
+      const next = await actions.saveProviderSettings(isLLM ? { llmProviderUrl: "", llmProviderName: "OpenAI Compatible", llmModel: "gpt-4o-mini", llmVisionModel: "", llmApiKey: "__CLEAR__" } : { providerUrl: "", providerName: "External Video API", providerModel: "video-default", providerImageModel: "", providerVideoModel: "", providerApiKey: "__CLEAR__" });
       setSettings({ ...EMPTY_SETTINGS, ...next });
       setCatalogs((current) => ({ ...current, [kind]: null }));
       setNotice(`${label} 已删除`);

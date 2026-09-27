@@ -46,7 +46,7 @@ async def generate_asset_image(project_id: str, payload: dict[str, Any], registr
         raise KeyError("只支持生成人物图或场景图")
     summary = registry.summary()
     provider_name = payload.get("provider") or summary["provider"]
-    model = payload.get("model") or (registry.external_model if summary["mode"] == "remote" else "mock-image")
+    model = payload.get("model") or (registry.image_model if summary["mode"] == "remote" else "mock-image")
     asset_id = create_asset(project_id, asset_type, _asset_payload(asset_type, payload))
     task_id = create_target_generation_task(
         project_id, "asset", asset_id,

@@ -178,7 +178,7 @@ export function App() {
     timers.current.set(taskId, timer);
   }, [notify]);
 
-  const pollRemoteGeneration = useCallback((taskId, shotId, attempt = 0) => {
+  const pollRemoteGeneration = useCallback((taskId, shotId, attempt = 0, onComplete) => {
     const timer = window.setTimeout(async () => {
       try {
         const remoteProject = await getRemoteProject();
@@ -186,6 +186,8 @@ export function App() {
         setProject(remoteProject);
         if (task?.status === "Success") {
           timers.current.delete(taskId);
+          const asset = [...(remoteProject.assets?.characters || []), ...(remoteProject.assets?.locations || []), ...(remoteProject.assets?.props || [])].find((item) => item.id === task.targetId);
+          onComplete?.(asset, task, remoteProject);
           notify(`${shotId} 已生成新版本`);
           return;
         }
@@ -194,7 +196,7 @@ export function App() {
           notify(`${shotId} 生成未完成，请在任务中心处理`, "error");
           return;
         }
-        pollRemoteGeneration(taskId, shotId, attempt + 1);
+        pollRemoteGeneration(taskId, shotId, attempt + 1, onComplete);
       } catch {
         timers.current.delete(taskId);
         setBackendStatus("offline");
@@ -260,7 +262,7 @@ export function App() {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return createRemoteScene(episodeId, payload);
     },
-    generateAsset: (assetType, payload) => {
+    generateAsset: (assetType, payload, onComplete) => {
       if (backendStatus !== "online") return Promise.reject(new Error("FastAPI 未连接"));
       return generateRemoteAsset(assetType, payload).then((response) => {
         const asset = response.asset;
@@ -273,6 +275,7 @@ export function App() {
               : [...current.assets[assetType], asset],
           },
         }));
+        if (response.taskId) pollRemoteGeneration(response.taskId, asset.id, 0, onComplete);
         return response;
       });
     },

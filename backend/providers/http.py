@@ -38,9 +38,9 @@ def resolve_generation_url(url: str, kind: str, model: str | None = None) -> str
     if not value or lowered.endswith(("/images/generations", "/image/generations", "/videos/generations", "/video/generations", "/generate")):
         return value
     if lowered.endswith("/v1"):
-        if kind == "image" or _contains_model_marker(model, _IMAGE_MODEL_MARKERS):
+        if kind == "image":
             return f"{value}/images/generations"
-        if kind == "video" and _contains_model_marker(model, _VIDEO_MODEL_MARKERS):
+        if kind == "video":
             return f"{value}/videos/generations"
     return value
 
@@ -64,7 +64,7 @@ class HttpProvider(BaseProvider):
             headers[self.auth_header] = f"{self.auth_prefix} {self.api_key}".strip()
         request = urllib.request.Request(url, data=json.dumps(payload or {}).encode("utf-8") if payload is not None else None, headers=headers, method=method or ("POST" if payload is not None else "GET"))
         try:
-            with urllib.request.urlopen(request, timeout=45) as response:
+            with urllib.request.urlopen(request, timeout=float(os.environ.get("SHORT_DRAMA_PROVIDER_TIMEOUT", "30"))) as response:
                 raw = response.read().decode("utf-8")
                 return json.loads(raw)
         except HTTPError as error:

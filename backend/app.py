@@ -104,7 +104,7 @@ from .domain.video_engine import create_video_clip, delete_video_clip, list_vide
 from .providers.registry import ProviderRegistry
 from .services.export_service import export_project_package
 from .services.asset_generation_service import generate_asset_image
-from .services.script_service import generate_episode_matrix, generate_scene_script, generate_shot_breakdown
+from .services.script_service import generate_episode_matrix_ai, generate_scene_script_ai, generate_shot_breakdown_ai
 from .services.task_engine import task_engine
 from .services.runtime_settings import _raw_settings, public_provider_settings, save_provider_settings, test_provider_connection
 from .services.model_discovery import ModelDiscoveryError, discover_models
@@ -1158,7 +1158,7 @@ async def generate_shot(shot_id: str, payload: Optional[dict[str, Any]] = Body(d
     shot = await get_shot(shot_id)
     summary = registry.summary()
     provider = payload.get("provider") or summary["provider"]
-    model = payload.get("model") or (registry.external_model if summary["mode"] == "remote" else "mock-video")
+    model = payload.get("model") or (registry.video_model if summary["mode"] == "remote" else "mock-video")
     estimated_cost = float(payload.get("estimatedCost") or (0.73 if summary["mode"] == "demo" else os.environ.get("SHORT_DRAMA_ESTIMATED_COST", "0.73")))
     reference_context = shot_generation_context(shot_id)
     try:
@@ -1236,7 +1236,7 @@ async def get_models() -> dict[str, Any]:
 @app.post("/api/episodes/{episode_id}/matrix")
 async def post_episode_matrix(episode_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
     try:
-        return generate_episode_matrix(episode_id, payload or {})
+        return await asyncio.to_thread(generate_episode_matrix_ai, episode_id, payload or {})
     except KeyError as error:
         raise not_found(str(error)) from error
 
@@ -1244,7 +1244,7 @@ async def post_episode_matrix(episode_id: str, payload: Optional[dict[str, Any]]
 @app.post("/api/scenes/{scene_id}/script")
 async def post_scene_script(scene_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
     try:
-        return generate_scene_script(scene_id, payload or {})
+        return await asyncio.to_thread(generate_scene_script_ai, scene_id, payload or {})
     except KeyError as error:
         raise not_found(str(error)) from error
 
@@ -1252,7 +1252,7 @@ async def post_scene_script(scene_id: str, payload: Optional[dict[str, Any]] = B
 @app.post("/api/scenes/{scene_id}/breakdown")
 async def post_scene_breakdown(scene_id: str, payload: Optional[dict[str, Any]] = Body(default=None)) -> dict[str, Any]:
     try:
-        return {"items": generate_shot_breakdown(scene_id, payload or {})}
+        return {"items": await asyncio.to_thread(generate_shot_breakdown_ai, scene_id, payload or {})}
     except KeyError as error:
         raise not_found(str(error)) from error
 

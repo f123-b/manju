@@ -16,6 +16,8 @@ SETTING_ENV = {
     "providerUrl": "SHORT_DRAMA_PROVIDER_URL",
     "providerName": "SHORT_DRAMA_PROVIDER_NAME",
     "providerModel": "SHORT_DRAMA_PROVIDER_MODEL",
+    "providerImageModel": "SHORT_DRAMA_PROVIDER_IMAGE_MODEL",
+    "providerVideoModel": "SHORT_DRAMA_PROVIDER_VIDEO_MODEL",
     "providerStatusUrl": "SHORT_DRAMA_PROVIDER_STATUS_URL",
     "providerApiKey": "SHORT_DRAMA_PROVIDER_API_KEY",
     "voiceProvider": "SHORT_DRAMA_VOICE_PROVIDER",
@@ -36,6 +38,8 @@ DEFAULTS = {
     "providerUrl": "",
     "providerName": "External Video API",
     "providerModel": "video-default",
+    "providerImageModel": "",
+    "providerVideoModel": "",
     "providerStatusUrl": "",
     "providerApiKey": "",
     "voiceProvider": "mock",
@@ -63,6 +67,13 @@ def _llm_models_endpoint(endpoint: str) -> str:
     if value.endswith("/models"):
         return value
     return f"{value}/models"
+
+
+def _is_placeholder_url(value: str | None) -> bool:
+    from urllib.parse import urlparse
+
+    hostname = (urlparse(str(value or "")).hostname or "").lower().rstrip(".")
+    return hostname in {"blankapi.com", "example.com", "api.example.com"} or hostname.endswith(".example.com")
 
 
 def _raw_settings() -> dict[str, str]:
@@ -164,6 +175,8 @@ def test_provider_connection(payload: dict[str, Any]) -> dict[str, Any]:
         return {"ok": False, "status": "not_configured", "message": "请先填写接口地址"}
     if not str(endpoint).startswith(("http://", "https://")):
         return {"ok": False, "status": "invalid", "message": "接口地址必须以 http:// 或 https:// 开头"}
+    if _is_placeholder_url(str(endpoint)):
+        return {"ok": False, "status": "invalid", "message": "当前是示例占位地址，请替换成真实 API 地址"}
     requested_endpoint = str(endpoint)
     if provider_kind == "llm":
         endpoint = _llm_models_endpoint(requested_endpoint)
