@@ -49,6 +49,7 @@ from .domain.repository import (
     patch_story_bible,
     project_to_dict,
     create_runninghub_workflow,
+    delete_project,
     delete_runninghub_workflow,
     retry_generation_task,
 )
@@ -278,6 +279,15 @@ async def post_project(payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
 @app.get("/api/projects/{project_id}")
 async def get_project_resource(project_id: str) -> dict[str, Any]:
     return project_response(project_id)
+
+
+@app.delete("/api/projects/{project_id}")
+async def delete_project_resource(project_id: str) -> dict[str, Any]:
+    try:
+        delete_project(project_id)
+        return {"ok": True, "projectId": project_id}
+    except KeyError as error:
+        raise not_found(str(error)) from error
 
 
 @app.get("/api/projects/{project_id}/tasks")

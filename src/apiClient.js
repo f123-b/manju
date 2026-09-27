@@ -21,6 +21,10 @@ export function getRemoteProject() {
   return request("/projects/P001");
 }
 
+export function createRemoteProject(payload = {}) {
+  return request("/projects", { method: "POST", body: JSON.stringify(payload) });
+}
+
 export function listRemoteTasks({ status, targetType, limit } = {}) {
   const params = new URLSearchParams();
   if (status) params.set("status", status);

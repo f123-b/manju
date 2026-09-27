@@ -482,6 +482,12 @@ def create_project(payload: dict[str, Any]) -> str:
     return project_id
 
 
+def delete_project(project_id: str) -> None:
+    with session() as connection:
+        _project_row(connection, project_id)
+        connection.execute("DELETE FROM projects WHERE id = ?", (project_id,))
+
+
 def patch_project(project_id: str, patch: dict[str, Any]) -> dict[str, Any]:
     allowed = {"title": "title", "status": "status", "format": "format", "targetEpisodes": "target_episodes", "currentEpisodeId": "current_episode_id", "dueDate": "due_date", "budget": "budget"}
     values = [(allowed[key], value) for key, value in patch.items() if key in allowed]

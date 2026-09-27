@@ -293,6 +293,12 @@ button { color: inherit; }
 .empty-workspace { display: grid; align-content: center; justify-items: center; color: #7c8796; text-align: center; }
 .empty-workspace strong { color: #324157; font-size: 17px; }
 .empty-workspace p { font-size: 12px; }
+.empty-workspace-page { min-height: calc(100vh - 110px); display: grid; place-items: center; }
+.empty-project-card { width: min(520px, 100%); display: grid; gap: 12px; padding: 42px; text-align: center; }
+.empty-project-card h1 { margin: 0; color: #1e2c41; font-size: 28px; }
+.empty-project-card p { margin: 0; color: #60748d; line-height: 1.8; }
+.empty-project-card small { color: #8a9aae; }
+.empty-project-card .primary-action { justify-self: center; margin-top: 8px; }
 
 /* Application modules */
 .module-page { width: min(1180px, calc(100% - 64px)); margin: 0 auto; padding: 38px 0 70px; }

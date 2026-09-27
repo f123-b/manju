@@ -7,6 +7,7 @@ import { RunningHubPage } from "./components/RunningHubPage.jsx";
 import { ModulePage, SearchDialog } from "./components/ModulePages.jsx";
 import {
   cancelRemoteTask,
+  createRemoteProject,
   createRemoteCanvasEdge,
   createRemoteCanvasNode,
   createRemoteAsset,
@@ -71,7 +72,6 @@ import {
   runRemoteShotQC,
   runRemoteProjectQC,
   runRemoteContinuityCheck,
-  saveRemoteProject,
   saveRemoteProviderSettings,
   testRemoteProviderSettings,
   runRemoteCanvasNode,
@@ -91,6 +91,7 @@ import {
   duplicateShot,
   getProjectStats,
   loadProject,
+  createEmptyProject,
   queueGeneration,
   removeShot,
   removeStoryRule,
@@ -103,6 +104,26 @@ import {
 function formatTimestamp(date = new Date()) {
   const pad = (value) => String(value).padStart(2, "0");
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(date.getMinutes())}`;
+}
+
+function EmptyWorkspace({ backendStatus, busy, onCreate }) {
+  return <div className="app-shell">
+    <Topbar project={createEmptyProject()} onSearch={() => {}} />
+    <div className="app-body">
+      <Sidebar activeNav="Agent" onNavigate={() => {}} />
+      <main className="content-shell">
+        <div className="module-page empty-workspace-page">
+          <section className="module-section empty-project-card">
+            <span className="section-kicker">EMPTY WORKSPACE</span>
+            <h1>当前没有项目</h1>
+            <p>预设项目已清空。先创建一个空白项目，再开始测试剧本、图片和视频流程。</p>
+            <small>{backendStatus === "online" ? "FastAPI 已连接，新的项目会保存到本地数据库。" : "FastAPI 未连接，请先启动后台服务。"}</small>
+            <button className="primary-action" type="button" disabled={busy || backendStatus !== "online"} onClick={onCreate}>{busy ? "创建中…" : "新建空白项目"}</button>
+          </section>
+        </div>
+      </main>
+    </div>
+  </div>;
 }
 
 function nextAssetId(items, prefix) {
@@ -118,6 +139,7 @@ export function App() {
   const [toast, setToast] = useState(null);
   const [backendStatus, setBackendStatus] = useState("checking");
   const [providerInfo, setProviderInfo] = useState(null);
+  const [createProjectBusy, setCreateProjectBusy] = useState(false);
   const backendHydrated = useRef(false);
   const timers = useRef(new Map());
 
@@ -136,14 +158,12 @@ export function App() {
           if (active) setBackendStatus("offline");
           return;
         }
-        saveRemoteProject(project)
-          .then(() => {
-            backendHydrated.current = true;
-            if (active) setBackendStatus("online");
-          })
-          .catch(() => {
-            if (active) setBackendStatus("offline");
-          });
+        backendHydrated.current = true;
+        if (active) {
+          setProject(createEmptyProject());
+          setSelectedShotId(null);
+          setBackendStatus("online");
+        }
       });
     return () => { active = false; };
   }, []);
@@ -766,6 +786,24 @@ export function App() {
     setActiveNav(result.target);
     setSearchOpen(false);
   };
+
+  const createBlankProject = async () => {
+    if (createProjectBusy || backendStatus !== "online") return;
+    setCreateProjectBusy(true);
+    try {
+      const next = await createRemoteProject({ id: "P001", title: "未命名短剧", status: "策划中", targetEpisodes: 1, currentEpisodeId: "EP01" });
+      setProject(next);
+      setSelectedShotId(null);
+      backendHydrated.current = true;
+      notify("空白项目已创建");
+    } catch (error) {
+      notify(error?.message || "创建项目失败", "error");
+    } finally {
+      setCreateProjectBusy(false);
+    }
+  };
+
+  if (!project.id) return <EmptyWorkspace backendStatus={backendStatus} busy={createProjectBusy} onCreate={createBlankProject} />;
 
   return (
     <div className="app-shell">

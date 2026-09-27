@@ -14,7 +14,7 @@ test("FastAPI boots a relational demo and completes a durable generation task", 
   const port = 8123;
   const server = spawn("python", ["-m", "uvicorn", "backend.app:app", "--host", "127.0.0.1", "--port", String(port)], {
     cwd: root,
-    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "test.sqlite3"), SHORT_DRAMA_DEMO_DELAY: "0.05", SHORT_DRAMA_POLL_INTERVAL: "0.05" },
+    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "test.sqlite3"), SHORT_DRAMA_SEED_DEMO: "1", SHORT_DRAMA_DEMO_DELAY: "0.05", SHORT_DRAMA_POLL_INTERVAL: "0.05" },
     stdio: "ignore",
   });
   t.after(async () => {
