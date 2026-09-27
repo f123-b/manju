@@ -8,6 +8,26 @@ const episodeTitles = [
   "旧情反噬", "旧情难断", "各自为战", "风向逆转", "终局对峙", "新的我",
 ];
 
+export const emptyProject = {
+  schemaVersion: 2,
+  id: "",
+  title: "未命名短剧",
+  status: "策划中",
+  format: "16:9",
+  targetEpisodes: 0,
+  currentEpisodeId: "",
+  dueDate: "",
+  budget: 0,
+  spent: 0,
+  production: { totalShots: 0, generatedShots: 0, qcScore: 0 },
+  storyBible: { logline: "", coreConflict: "", mainLine: "", theme: "", ending: "", world: "", style: "", rules: [] },
+  episodes: [],
+  currentScene: { id: "", number: 0, title: "尚未创建场景", purpose: "" },
+  shots: [],
+  assets: { characters: [], locations: [], props: [] },
+  tasks: [],
+};
+
 export const initialProject = {
   schemaVersion: 1,
   id: "P001",

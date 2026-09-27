@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 import threading
 from contextlib import contextmanager
@@ -103,7 +104,8 @@ def init_database() -> None:
         legacy = connection.execute(
             "SELECT data_json FROM project_state ORDER BY updated_at DESC LIMIT 1"
         ).fetchone() if table_exists(connection, "project_state") else None
-    if not has_projects:
+    seed_demo = os.environ.get("SHORT_DRAMA_SEED_DEMO", "").strip().lower() in {"1", "true", "yes", "on"}
+    if not has_projects and seed_demo:
         from ..domain.seed import seed_demo_project, seed_legacy_project
 
         if legacy:

@@ -44,7 +44,7 @@ test("discovers and classifies OpenAI-compatible models", async (t) => {
   await new Promise((resolve) => modelServer.listen(8132, "127.0.0.1", resolve));
   const server = spawn("python", ["-m", "uvicorn", "backend.app:app", "--host", "127.0.0.1", "--port", "8131"], {
     cwd: root,
-    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "models.sqlite3"), SHORT_DRAMA_DEMO_DELAY: "0.03", SHORT_DRAMA_POLL_INTERVAL: "0.03" },
+    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "models.sqlite3"), SHORT_DRAMA_SEED_DEMO: "1", SHORT_DRAMA_DEMO_DELAY: "0.03", SHORT_DRAMA_POLL_INTERVAL: "0.03" },
     stdio: "ignore",
   });
   t.after(async () => {

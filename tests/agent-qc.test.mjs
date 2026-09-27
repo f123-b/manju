@@ -50,7 +50,7 @@ test("persistent agent runs and project visual QC can be resumed through the API
   const port = 8126;
   const server = spawn("python", ["-m", "uvicorn", "backend.app:app", "--host", "127.0.0.1", "--port", String(port)], {
     cwd: root,
-    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "agent.sqlite3"), SHORT_DRAMA_DEMO_DELAY: "0.03", SHORT_DRAMA_POLL_INTERVAL: "0.03" },
+    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "agent.sqlite3"), SHORT_DRAMA_SEED_DEMO: "1", SHORT_DRAMA_DEMO_DELAY: "0.03", SHORT_DRAMA_POLL_INTERVAL: "0.03" },
     stdio: "ignore",
   });
   t.after(async () => {
@@ -147,7 +147,7 @@ test("configured LLM vision QC sends an image and persists semantic findings", a
   const port = 8127;
   const server = spawn("python", ["-m", "uvicorn", "backend.app:app", "--host", "127.0.0.1", "--port", String(port)], {
     cwd: root,
-    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "vision.sqlite3"), SHORT_DRAMA_DEMO_DELAY: "0.03" },
+    env: { ...process.env, SHORT_DRAMA_DB: path.join(tempDir, "vision.sqlite3"), SHORT_DRAMA_SEED_DEMO: "1", SHORT_DRAMA_DEMO_DELAY: "0.03" },
     stdio: "ignore",
   });
   t.after(async () => {
